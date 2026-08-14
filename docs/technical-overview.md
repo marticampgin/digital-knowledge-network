@@ -24,7 +24,7 @@ The project is a single Node.js codebase with a React frontend. It avoids a sepa
 - **Persistence:** Node's built-in SQLite interface stores works, sources, capture groups, notes, edges, Telegram cursors, and model/prompt provenance in `.dkn/knowledge.sqlite`.
 - **OCR:** Tesseract.js 7 with packaged English language data. The OCR result—not the uploaded screenshot—is retained as canonical evidence.
 - **Speech-to-text:** a pinned local `whisper.cpp` runtime with the English `base.en` model. FFmpeg converts formats when required. The transcript is retained; temporary audio is removed.
-- **Language model:** LFM2.5-2.6B runs outside the application behind an OpenAI-compatible `/chat/completions` endpoint, normally through a local `llama.cpp` server. The adapter can target another compatible runtime without changing domain logic.
+- **Language model:** LFM2.5-2.6B runs outside the application behind an OpenAI-compatible `/chat/completions` endpoint. On Windows, the pinned `llama.cpp` Vulkan runtime detects the installed GPU and offloads all model layers to VRAM. The adapter can target another compatible runtime without changing domain logic.
 - **Quality tooling:** Vitest covers the data and ingestion pipeline; TypeScript performs static checks; Playwright supports browser-level UI verification.
 
 ## Data and processing model

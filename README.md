@@ -46,7 +46,7 @@ $env:DKN_LLM_API_KEY='local'
 node dist/server/cli.js process --provider openai
 ```
 
-`npm run models:setup` downloads the 1.7 GB LFM2.5 `Q4_K_M` GGUF, 148 MB Whisper `base.en`, and pinned Windows CPU runtimes under the git-ignored `.dkn` directory. Start the local language model in its own terminal with `npm run models:start`.
+`npm run models:setup` downloads the 1.7 GB LFM2.5 `Q4_K_M` GGUF, 148 MB Whisper `base.en`, and a pinned Windows Vulkan runtime under the git-ignored `.dkn` directory. `npm run models:start` detects the GPU and offloads all language-model layers to it. Keep that command running in its own terminal.
 
 Run the application in development:
 

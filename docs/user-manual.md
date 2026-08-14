@@ -54,7 +54,7 @@ npm run dev -- process --provider openai
 npm run dev -- status
 ```
 
-Run `models:start` in its own terminal and leave it open while processing. Synchronization is incremental and content-hash deduplicated. Re-running it is safe. The default local model is `LiquidAI/LFM2.5-2.6B`; its endpoint and model name can be changed in `.env`.
+Run `models:start` in its own terminal and leave it open while processing. The bundled Windows runtime uses Vulkan and offloads all language-model layers to `Vulkan0` by default; its startup output lists and names the selected device. To choose another listed adapter for one session, set `$env:DKN_LLM_DEVICE='Vulkan1'` before starting it. Synchronization is incremental and content-hash deduplicated. Re-running it is safe. The default local model is `LiquidAI/LFM2.5-2.6B`; its endpoint and model name can be changed in `.env`.
 
 ## Use the application
 

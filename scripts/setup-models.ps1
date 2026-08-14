@@ -21,9 +21,10 @@ Write-Host 'Downloading Whisper base.en (about 148 MB)...'
 
 $llamaVersion = 'b10428'
 $llamaDir = Join-Path $toolsRoot 'llama.cpp'
-if (-not (Test-Path -LiteralPath (Join-Path $llamaDir 'llama-server.exe'))) {
+if (-not (Test-Path -LiteralPath (Join-Path $llamaDir 'ggml-vulkan.dll'))) {
   $llamaZip = Join-Path $toolsRoot 'llama.zip'
-  Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/ggml-org/llama.cpp/releases/download/$llamaVersion/llama-$llamaVersion-bin-win-cpu-x64.zip" -OutFile $llamaZip
+  Write-Host 'Installing the llama.cpp Vulkan runtime for GPU acceleration...'
+  Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/ggml-org/llama.cpp/releases/download/$llamaVersion/llama-$llamaVersion-bin-win-vulkan-x64.zip" -OutFile $llamaZip
   New-Item -ItemType Directory -Force -Path $llamaDir | Out-Null
   Expand-Archive -LiteralPath $llamaZip -DestinationPath $llamaDir -Force
   Remove-Item -LiteralPath $llamaZip
@@ -46,5 +47,5 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
 
 Write-Host 'Local model setup complete.'
 Write-Host "Language model: $(Join-Path $modelsRoot 'lfm2.5-2.6b\LFM2.5-2.6B-Q4_K_M.gguf')"
+Write-Host 'LLM runtime:    llama.cpp Vulkan (GPU accelerated)'
 Write-Host "Speech model:   $(Join-Path $modelsRoot 'whisper\ggml-base.en.bin')"
-
