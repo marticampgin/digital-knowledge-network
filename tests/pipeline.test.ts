@@ -38,10 +38,49 @@ describe("knowledge pipeline", () => {
     }
   });
 
+  it("reports enrichment progress and heartbeats", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dkn-"));
+    dirs.push(dir);
+    const store = new KnowledgeStore(join(dir, "knowledge.sqlite"));
+    try {
+      store.addSource({ kind: "text", title: "Progress", origin: "progress", rawContent: "Progress evidence" }, ["Progress evidence"]);
+      const phases: string[] = [];
+      await processPending(store, {
+        name: "slow-test",
+        async enrich() {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return { coreIdea: "Progress", context: "", tags: ["progress"], confidence: 1 };
+        },
+      }, 100, { heartbeatMs: 5, onProgress: (progress) => phases.push(progress.phase) });
+      expect(phases).toEqual(expect.arrayContaining(["start", "note-start", "heartbeat", "note-complete", "complete"]));
+    } finally {
+      store.close();
+    }
+  });
+
   it("parses reasoning-model JSON safely", () => {
-    expect(parseEnrichment('<think>private reasoning</think>\n```json\n{"coreIdea":"A claim","context":"Supported context","tags":["Learning","learning"],"confidence":1.4}\n```')).toEqual({
-      coreIdea: "A claim", context: "Supported context", tags: ["learning"], confidence: 1,
+    expect(parseEnrichment('<think>private reasoning</think>\n```json\n{"coreIdea":"A claim","context":"Supported context","tags":["Customer_Experience","customer experience","Learning","learning"],"confidence":1.4}\n```')).toEqual({
+      coreIdea: "A claim", context: "Supported context", tags: ["customer experience", "learning"], confidence: 1,
     });
+  });
+
+  it("connects equivalent underscore and space tags", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dkn-"));
+    dirs.push(dir);
+    const store = new KnowledgeStore(join(dir, "knowledge.sqlite"));
+    try {
+      const left = store.addSource({ kind: "text", title: "Left", origin: "left", rawContent: "Left" }, ["Left"]);
+      const right = store.addSource({ kind: "text", title: "Right", origin: "right", rawContent: "Right" }, ["Right"]);
+      const [leftNote, rightNote] = store.pendingNotes();
+      expect(leftNote && rightNote).toBeTruthy();
+      store.enrichNote(leftNote!.id, { coreIdea: "Left", context: "", tags: ["customer_experience"], confidence: 1 }, "test", "test");
+      store.enrichNote(rightNote!.id, { coreIdea: "Right", context: "", tags: ["customer experience"], confidence: 1 }, "test", "test");
+      expect(store.replaceDerivedEdges()).toBe(1);
+      expect(store.exportGraph().notes.map((note) => note.tags)).toEqual([["customer experience"], ["customer experience"]]);
+      expect(left.duplicate || right.duplicate).toBe(false);
+    } finally {
+      store.close();
+    }
   });
 
   it("registers a work and binds it to a Telegram topic", () => {

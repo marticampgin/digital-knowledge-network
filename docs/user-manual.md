@@ -56,6 +56,8 @@ npm run dev -- status
 
 Run `models:start` in its own terminal and leave it open while processing. The bundled Windows runtime uses Vulkan and offloads all language-model layers to `Vulkan0` by default; its startup output lists and names the selected device. To choose another listed adapter for one session, set `$env:DKN_LLM_DEVICE='Vulkan1'` before starting it. Synchronization is incremental and content-hash deduplicated. Re-running it is safe. The default local model is `LiquidAI/LFM2.5-2.6B`; its endpoint and model name can be changed in `.env`.
 
+Both long-running commands report live terminal progress. Telegram sync prints each message's position, extraction state, elapsed-time heartbeat, and result. LLM processing prints the queued total, current note, a heartbeat every five seconds, completion time, failures, and the final graph-edge count. `npm run models:start` is safe to repeat: if the server already owns port 8080, it reports the existing PID and exits without loading a duplicate model.
+
 ## Use the application
 
 Start the production application with `npm start` and open `http://127.0.0.1:4174`. For development, use `npm run app` and open `http://127.0.0.1:5173`.

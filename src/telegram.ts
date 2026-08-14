@@ -32,6 +32,16 @@ export interface TelegramSyncResult {
 
 export type PassageAction = "start" | "end" | "continue";
 
+export type TelegramSyncProgress =
+  | { phase: "start"; total: number }
+  | { phase: "message-start" | "heartbeat" | "message-complete" | "message-failed"; current: number; total: number; messageId: number; elapsedMs: number; status?: "imported" | "duplicate" | "skipped" | "command"; error?: string }
+  | { phase: "complete"; total: number; elapsedMs: number };
+
+export interface TelegramSyncOptions extends ExtractionOptions {
+  onProgress?: (progress: TelegramSyncProgress) => void;
+  heartbeatMs?: number;
+}
+
 export class TelegramClient {
   constructor(private readonly token: string) {
     if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set");
@@ -54,18 +64,28 @@ export class TelegramClient {
     return [...chats.values()];
   }
 
-  async sync(store: KnowledgeStore, chatId: number, options: ExtractionOptions = {}): Promise<TelegramSyncResult> {
+  async sync(store: KnowledgeStore, chatId: number, options: TelegramSyncOptions = {}): Promise<TelegramSyncResult> {
     const savedOffset = store.getSetting("telegram.update_offset");
     const updates = await this.updates(savedOffset ? Number(savedOffset) : undefined);
+    const relevantMessages = updates.map((update) => update.message ?? update.channel_post).filter((message): message is TelegramMessage => Boolean(message && message.chat.id === chatId));
+    const syncStarted = Date.now();
+    options.onProgress?.({ phase: "start", total: relevantMessages.length });
     const result: TelegramSyncResult = {
       updates: updates.length, imported: 0, duplicates: 0, commands: 0, skipped: 0, errors: [],
       registeredSources: [], passageCommands: [], captureGroups: 0, notesRebuilt: 0,
     };
     let nextOffset = savedOffset ? Number(savedOffset) : 0;
+    let current = 0;
     for (const update of updates) {
       nextOffset = Math.max(nextOffset, update.update_id + 1);
       const message = update.message ?? update.channel_post;
       if (!message || message.chat.id !== chatId) continue;
+      current += 1;
+      const messageStarted = Date.now();
+      options.onProgress?.({ phase: "message-start", current, total: relevantMessages.length, messageId: message.message_id, elapsedMs: 0 });
+      const heartbeat = options.onProgress ? setInterval(() => {
+        options.onProgress?.({ phase: "heartbeat", current, total: relevantMessages.length, messageId: message.message_id, elapsedMs: Date.now() - messageStarted });
+      }, options.heartbeatMs ?? 5_000) : undefined;
       try {
         const imported = await this.importMessage(store, message, options);
         if (imported.status === "imported") result.imported += 1;
@@ -75,8 +95,13 @@ export class TelegramClient {
           if (imported.registration) result.registeredSources.push(imported.registration);
           if (imported.passage) result.passageCommands.push(imported.passage);
         } else result.skipped += 1;
+        options.onProgress?.({ phase: "message-complete", current, total: relevantMessages.length, messageId: message.message_id, elapsedMs: Date.now() - messageStarted, status: imported.status });
       } catch (error) {
-        result.errors.push(`Message ${message.message_id}: ${error instanceof Error ? error.message : String(error)}`);
+        const messageText = error instanceof Error ? error.message : String(error);
+        result.errors.push(`Message ${message.message_id}: ${messageText}`);
+        options.onProgress?.({ phase: "message-failed", current, total: relevantMessages.length, messageId: message.message_id, elapsedMs: Date.now() - messageStarted, error: messageText });
+      } finally {
+        if (heartbeat) clearInterval(heartbeat);
       }
     }
     if (nextOffset > 0) store.setSetting("telegram.update_offset", String(nextOffset));
@@ -84,6 +109,7 @@ export class TelegramClient {
     const grouped = store.coalesceCaptureGroups();
     result.captureGroups = grouped.groups;
     result.notesRebuilt = grouped.notesRebuilt;
+    options.onProgress?.({ phase: "complete", total: relevantMessages.length, elapsedMs: Date.now() - syncStarted });
     return result;
   }
 

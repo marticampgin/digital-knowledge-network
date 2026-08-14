@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { EdgeRecord, EdgeType, Enrichment, EnrichmentContext, GraphExport, NoteRecord, SourceInput, SourceRecord, WorkInput, WorkRecord } from "./domain.js";
+import { normalizeTags } from "./tags.js";
 
 type Row = Record<string, unknown>;
 
@@ -387,7 +388,7 @@ export class KnowledgeStore {
     this.db.prepare(`
       UPDATE notes SET core_idea = ?, context = ?, tags_json = ?, confidence = ?, status = 'enriched', model = ?, prompt_version = ?, updated_at = ?
       WHERE id = ?
-    `).run(enrichment.coreIdea, enrichment.context, json(enrichment.tags), enrichment.confidence, model, promptVersion, now(), noteId);
+    `).run(enrichment.coreIdea, enrichment.context, json(normalizeTags(enrichment.tags)), enrichment.confidence, model, promptVersion, now(), noteId);
   }
 
   failNote(noteId: string): void {
@@ -535,7 +536,7 @@ export class KnowledgeStore {
     return {
       id: String(row.id), sourceId: String(row.source_id), captureGroupId: row.capture_group_id === null || row.capture_group_id === undefined ? null : String(row.capture_group_id), ordinal: Number(row.ordinal), rawText: String(row.raw_text),
       coreIdea: row.core_idea === null ? null : String(row.core_idea), context: row.context === null ? null : String(row.context),
-      tags: parseJson<string[]>(row.tags_json, []), confidence: row.confidence === null ? null : Number(row.confidence),
+      tags: normalizeTags(parseJson<string[]>(row.tags_json, [])), confidence: row.confidence === null ? null : Number(row.confidence),
       status: String(row.status) as NoteRecord["status"], model: row.model === null ? null : String(row.model),
       promptVersion: row.prompt_version === null ? null : String(row.prompt_version), createdAt: String(row.created_at), updatedAt: String(row.updated_at),
     };

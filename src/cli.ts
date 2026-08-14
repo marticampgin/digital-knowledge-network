@@ -5,10 +5,10 @@ import { loadEnvFile } from "node:process";
 import { parseArgs } from "node:util";
 import { HeuristicEnricher, OpenAICompatibleEnricher } from "./enrichment.js";
 import { extractFile } from "./extractors.js";
-import { processPending } from "./pipeline.js";
+import { processPending, type ProcessProgress } from "./pipeline.js";
 import { PROMPT_VERSION } from "./enrichment.js";
 import { KnowledgeStore } from "./store.js";
-import { TelegramClient } from "./telegram.js";
+import { TelegramClient, type TelegramSyncProgress } from "./telegram.js";
 
 const usage = `Digital Knowledge Network (v0.1)
 
@@ -27,6 +27,8 @@ Default database: .dkn/knowledge.sqlite
 `;
 
 async function main(): Promise<void> {
+  const envPath = resolve(".env");
+  if (existsSync(envPath)) loadEnvFile(envPath);
   const [command, ...rest] = process.argv.slice(2);
   if (!command || command === "help" || command === "--help") {
     console.log(usage);
@@ -66,10 +68,9 @@ async function main(): Promise<void> {
         apiKey: process.env.DKN_LLM_API_KEY ?? "local",
         model: process.env.DKN_LLM_MODEL ?? "LiquidAI/LFM2.5-2.6B",
       }) : (() => { throw new Error(`Unknown provider: ${provider}`); })();
-      console.log(JSON.stringify({ requeued, ...await processPending(store, enricher, limit) }, null, 2));
+      const result = await processPending(store, enricher, limit, { onProgress: reportProcessProgress });
+      console.log(JSON.stringify({ requeued, ...result }, null, 2));
     } else if (command === "telegram") {
-      const envPath = resolve(".env");
-      if (existsSync(envPath)) loadEnvFile(envPath);
       const client = new TelegramClient(process.env.TELEGRAM_BOT_TOKEN ?? "");
       const action = positionals[0];
       if (action === "discover") {
@@ -77,7 +78,7 @@ async function main(): Promise<void> {
       } else if (action === "sync") {
         const configured = values["chat-id"] ?? process.env.TELEGRAM_CHAT_ID ?? store.getSetting("telegram.chat_id");
         if (!configured || !/^-?\d+$/.test(configured)) throw new Error("Provide --chat-id ID once, or set TELEGRAM_CHAT_ID");
-        console.log(JSON.stringify(await client.sync(store, Number(configured)), null, 2));
+        console.log(JSON.stringify(await client.sync(store, Number(configured), { onProgress: reportTelegramProgress }), null, 2));
       } else {
         throw new Error("telegram requires 'discover' or 'sync'");
       }
@@ -94,6 +95,43 @@ async function main(): Promise<void> {
   } finally {
     store.close();
   }
+}
+
+function reportProcessProgress(progress: ProcessProgress): void {
+  if (progress.phase === "start") {
+    console.log(progress.total ? `[process] ${progress.total} note${progress.total === 1 ? "" : "s"} queued.` : "[process] No notes are waiting for enrichment; graph connections will still be refreshed.");
+  } else if (progress.phase === "note-start") {
+    console.log(`[process ${progress.current}/${progress.total}] Enriching ${progress.noteId.slice(0, 8)}: ${progress.preview || "(empty preview)"}`);
+  } else if (progress.phase === "heartbeat") {
+    console.log(`[process ${progress.current}/${progress.total}] Still generating on ${progress.noteId.slice(0, 8)} (${formatElapsed(progress.elapsedMs)})...`);
+  } else if (progress.phase === "note-complete") {
+    console.log(`[process ${progress.current}/${progress.total}] Completed ${progress.noteId.slice(0, 8)} in ${formatElapsed(progress.elapsedMs)}.`);
+  } else if (progress.phase === "note-failed") {
+    console.error(`[process ${progress.current}/${progress.total}] Failed ${progress.noteId.slice(0, 8)} after ${formatElapsed(progress.elapsedMs)}: ${progress.error}`);
+  } else if (progress.phase === "complete") {
+    console.log(`[process] Finished ${progress.processed}/${progress.total}; ${progress.failed} failed; ${progress.edges} graph edges (${formatElapsed(progress.elapsedMs)}).`);
+  }
+}
+
+function reportTelegramProgress(progress: TelegramSyncProgress): void {
+  if (progress.phase === "start") {
+    console.log(progress.total ? `[telegram] ${progress.total} new message${progress.total === 1 ? "" : "s"} found.` : "[telegram] No new messages found.");
+  } else if (progress.phase === "message-start") {
+    console.log(`[telegram ${progress.current}/${progress.total}] Importing message ${progress.messageId}...`);
+  } else if (progress.phase === "heartbeat") {
+    console.log(`[telegram ${progress.current}/${progress.total}] Still extracting message ${progress.messageId} (${formatElapsed(progress.elapsedMs)})...`);
+  } else if (progress.phase === "message-complete") {
+    console.log(`[telegram ${progress.current}/${progress.total}] Message ${progress.messageId}: ${progress.status} in ${formatElapsed(progress.elapsedMs)}.`);
+  } else if (progress.phase === "message-failed") {
+    console.error(`[telegram ${progress.current}/${progress.total}] Message ${progress.messageId} failed after ${formatElapsed(progress.elapsedMs)}: ${progress.error}`);
+  } else if (progress.phase === "complete") {
+    console.log(`[telegram] Synchronization finished in ${formatElapsed(progress.elapsedMs)}.`);
+  }
+}
+
+function formatElapsed(milliseconds: number): string {
+  const seconds = Math.max(0, Math.round(milliseconds / 1_000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 main().catch((error: unknown) => {

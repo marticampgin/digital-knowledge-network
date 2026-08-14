@@ -9,6 +9,15 @@ if (-not (Test-Path -LiteralPath $server) -or -not (Test-Path -LiteralPath $mode
 if (-not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $server) 'ggml-vulkan.dll'))) {
   throw 'GPU runtime is missing. Run npm run models:setup to install the llama.cpp Vulkan build.'
 }
+$existingListener = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($existingListener) {
+  $existingProcess = Get-Process -Id $existingListener.OwningProcess -ErrorAction SilentlyContinue
+  if ($existingProcess -and $existingProcess.ProcessName -eq 'llama-server') {
+    Write-Host "The model server is already running on port 8080 (PID $($existingProcess.Id))."
+    exit 0
+  }
+  throw "Port 8080 is already used by PID $($existingListener.OwningProcess). Stop that process or configure another port."
+}
 
 $devices = (& $server --list-devices 2>&1 | Out-String).Trim()
 if (-not $devices -or $devices -match 'No devices') {

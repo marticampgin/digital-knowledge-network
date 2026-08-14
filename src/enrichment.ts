@@ -1,4 +1,5 @@
 import type { Enrichment, EnrichmentContext, NoteRecord } from "./domain.js";
+import { normalizeTags } from "./tags.js";
 
 export interface Enricher {
   readonly name: string;
@@ -20,7 +21,7 @@ export class HeuristicEnricher implements Enricher {
     for (const word of plain.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}-]{3,}/gu) ?? []) {
       if (!STOP_WORDS.has(word)) counts.set(word, (counts.get(word) ?? 0) + 1);
     }
-    const tags = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5).map(([word]) => word);
+    const tags = normalizeTags([...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5).map(([word]) => word));
     return { coreIdea, context: sentences.slice(1, 3).join(" ").slice(0, 500), tags, confidence: 0.35 };
   }
 }
@@ -88,7 +89,7 @@ export function parseEnrichment(content: string): Enrichment {
   if (start < 0 || end <= start) throw new Error("Model response did not contain a JSON object");
   const value = JSON.parse(cleaned.slice(start, end + 1)) as Partial<Enrichment>;
   if (typeof value.coreIdea !== "string" || !value.coreIdea.trim()) throw new Error("Model response is missing coreIdea");
-  const tags = Array.isArray(value.tags) ? value.tags.filter((tag): tag is string => typeof tag === "string").map((tag) => tag.trim().toLowerCase()).filter(Boolean).slice(0, 10) : [];
+  const tags = normalizeTags(Array.isArray(value.tags) ? value.tags.filter((tag): tag is string => typeof tag === "string") : []);
   const confidence = typeof value.confidence === "number" ? Math.max(0, Math.min(1, value.confidence)) : 0.5;
-  return { coreIdea: value.coreIdea.trim(), context: typeof value.context === "string" ? value.context.trim() : "", tags: [...new Set(tags)], confidence };
+  return { coreIdea: value.coreIdea.trim(), context: typeof value.context === "string" ? value.context.trim() : "", tags, confidence };
 }
