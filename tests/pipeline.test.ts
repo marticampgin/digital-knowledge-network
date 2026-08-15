@@ -64,7 +64,7 @@ describe("knowledge pipeline", () => {
     });
   });
 
-  it("connects equivalent underscore and space tags", () => {
+  it("normalizes equivalent underscore and space tags without using tags as graph topology", () => {
     const dir = mkdtempSync(join(tmpdir(), "dkn-"));
     dirs.push(dir);
     const store = new KnowledgeStore(join(dir, "knowledge.sqlite"));
@@ -75,7 +75,7 @@ describe("knowledge pipeline", () => {
       expect(leftNote && rightNote).toBeTruthy();
       store.enrichNote(leftNote!.id, { coreIdea: "Left", context: "", tags: ["customer_experience"], confidence: 1 }, "test", "test");
       store.enrichNote(rightNote!.id, { coreIdea: "Right", context: "", tags: ["customer experience"], confidence: 1 }, "test", "test");
-      expect(store.replaceDerivedEdges()).toBe(1);
+      expect(store.replaceDerivedEdges()).toBe(0);
       expect(store.exportGraph().notes.map((note) => note.tags)).toEqual([["customer experience"], ["customer experience"]]);
       expect(left.duplicate || right.duplicate).toBe(false);
     } finally {
@@ -98,7 +98,30 @@ describe("knowledge pipeline", () => {
         kind: "telegram", title: "Capture", origin: "telegram://-100123/6", rawContent: "A passage", workId: assigned?.id,
       }, ["A passage"]);
       expect(added.source.workId).toBe(registered.work.id);
-      expect(store.exportGraph()).toMatchObject({ schemaVersion: 2, works: [{ title: "The Everything Store" }] });
+      expect(store.exportGraph()).toMatchObject({ schemaVersion: 3, works: [{ title: "The Everything Store" }] });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("builds a work-sequence backbone and mutual semantic-neighbor edges", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dkn-"));
+    dirs.push(dir);
+    const store = new KnowledgeStore(join(dir, "knowledge.sqlite"));
+    try {
+      const work = store.upsertWork({ kind: "book", title: "Systems" }).work;
+      const left = store.addSource({ kind: "text", title: "Page 1", origin: "page-1", rawContent: "Customer learning", workId: work.id, capturedAt: "2025-01-01T00:00:00.000Z" }, ["Customer learning"]);
+      const right = store.addSource({ kind: "text", title: "Page 2", origin: "page-2", rawContent: "Feedback loops", workId: work.id, capturedAt: "2025-01-02T00:00:00.000Z" }, ["Feedback loops"]);
+      const notes = store.pendingNotes();
+      expect(notes).toHaveLength(2);
+      store.enrichNote(notes[0]!.id, { coreIdea: "Learning from customers", context: "", tags: ["learning"], confidence: 1 }, "test", "test");
+      store.enrichNote(notes[1]!.id, { coreIdea: "Feedback enables learning", context: "", tags: ["feedback"], confidence: 1 }, "test", "test");
+      store.storeEmbedding(notes[0]!.id, "test-embedding", "left", [1, 0]);
+      store.storeEmbedding(notes[1]!.id, "test-embedding", "right", [0.9, 0.1]);
+      expect(store.replaceDerivedEdges({ embeddingModel: "test-embedding", withinWorkThreshold: 0.4 })).toBe(2);
+      const edgeTypes = store.exportGraph().edges.map((edge) => edge.type);
+      expect(edgeTypes).toEqual(expect.arrayContaining(["work_sequence", "semantic_similarity"]));
+      expect(left.duplicate || right.duplicate).toBe(false);
     } finally {
       store.close();
     }

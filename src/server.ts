@@ -5,6 +5,8 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { loadEnvFile } from "node:process";
 import { HeuristicEnricher, OpenAICompatibleEnricher } from "./enrichment.js";
+import { OpenAIConceptMaintenanceEvaluator, OpenAIConceptSelector } from "./concepts.js";
+import { MiniLmEmbedder } from "./embeddings.js";
 import { extractFile } from "./extractors.js";
 import { processPending } from "./pipeline.js";
 import { KnowledgeStore } from "./store.js";
@@ -25,6 +27,12 @@ app.get("/api/graph", async () => {
   const graph = store.exportGraph();
   const sources = new Map(graph.sources.map((source) => [source.id, source]));
   const works = new Map(graph.works.map((work) => [work.id, work]));
+  const concepts = new Map(graph.concepts.map((concept) => [concept.id, concept]));
+  const conceptsByNote = new Map<string, string[]>();
+  for (const assignment of graph.noteConcepts) {
+    const concept = concepts.get(assignment.conceptId);
+    if (concept) conceptsByNote.set(assignment.noteId, [...(conceptsByNote.get(assignment.noteId) ?? []), concept.preferredLabel]);
+  }
   return {
     nodes: graph.notes.map((note) => {
       const source = sources.get(note.sourceId);
@@ -36,6 +44,7 @@ app.get("/api/graph", async () => {
         context: note.context,
         sourceText: note.rawText,
         tags: note.tags,
+        concepts: conceptsByNote.get(note.id) ?? [],
         status: note.status,
         confidence: note.confidence,
         sourceId: note.sourceId,
@@ -73,7 +82,20 @@ app.post<{ Body: { provider?: string; limit?: number } }>("/api/process", async 
     apiKey: process.env.DKN_LLM_API_KEY ?? "local",
     model: process.env.DKN_LLM_MODEL ?? "LiquidAI/LFM2.5-2.6B",
   }) : new HeuristicEnricher();
-  return processPending(store, enricher, request.body?.limit ?? 100);
+  if (provider !== "openai") return processPending(store, enricher, request.body?.limit ?? 100);
+  const options = {
+    baseUrl: process.env.DKN_LLM_BASE_URL ?? "http://127.0.0.1:8080/v1",
+    apiKey: process.env.DKN_LLM_API_KEY ?? "local",
+    model: process.env.DKN_LLM_MODEL ?? "LiquidAI/LFM2.5-2.6B",
+  };
+  const embedder = new MiniLmEmbedder(process.env.DKN_EMBEDDING_MODEL, resolve(dataDir, "models/transformers"));
+  try {
+    return await processPending(store, enricher, request.body?.limit ?? 100, { knowledge: {
+      selector: new OpenAIConceptSelector(options), embedder, maintenance: new OpenAIConceptMaintenanceEvaluator(options),
+    } });
+  } finally {
+    await embedder.dispose();
+  }
 });
 
 app.post<{ Params: { id: string } }>("/api/notes/:id/review", async (request, reply) => {

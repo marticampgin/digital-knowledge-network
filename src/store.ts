@@ -2,7 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { EdgeRecord, EdgeType, Enrichment, EnrichmentContext, GraphExport, NoteRecord, SourceInput, SourceRecord, WorkInput, WorkRecord } from "./domain.js";
+import type { ConceptMergeProposalRecord, ConceptRecord, ConceptSelection, EdgeRecord, EdgeType, Enrichment, EnrichmentContext, GraphExport, NoteConceptRecord, NoteRecord, SourceInput, SourceRecord, WorkInput, WorkRecord } from "./domain.js";
+import { normalizeConceptLabel } from "./concepts.js";
+import { cosineSimilarity, EMBEDDING_VERSION } from "./embeddings.js";
 import { normalizeTags } from "./tags.js";
 
 type Row = Record<string, unknown>;
@@ -91,6 +93,67 @@ export class KnowledgeStore {
         created_at TEXT NOT NULL,
         UNIQUE(from_note_id, to_note_id, type)
       );
+      CREATE TABLE IF NOT EXISTS concepts (
+        id TEXT PRIMARY KEY,
+        preferred_label TEXT NOT NULL,
+        identity_key TEXT NOT NULL UNIQUE,
+        aliases_json TEXT NOT NULL DEFAULT '[]',
+        definition TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        merged_into_id TEXT REFERENCES concepts(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS note_concepts (
+        note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        concept_id TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+        confidence REAL NOT NULL,
+        evidence TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prompt_version TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(note_id, concept_id)
+      );
+      CREATE TABLE IF NOT EXISTS concept_selection_runs (
+        note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        prompt_version TEXT NOT NULL,
+        model TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(note_id, prompt_version)
+      );
+      CREATE TABLE IF NOT EXISTS note_embeddings (
+        note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        model TEXT NOT NULL,
+        representation_version TEXT NOT NULL,
+        input_hash TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(note_id, model, representation_version)
+      );
+      CREATE TABLE IF NOT EXISTS concept_embeddings (
+        concept_id TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+        model TEXT NOT NULL,
+        representation_version TEXT NOT NULL,
+        input_hash TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(concept_id, model, representation_version)
+      );
+      CREATE TABLE IF NOT EXISTS concept_merge_proposals (
+        id TEXT PRIMARY KEY,
+        left_concept_id TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+        right_concept_id TEXT NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+        recommendation TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        rationale TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'proposed',
+        model TEXT NOT NULL,
+        prompt_version TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(left_concept_id, right_concept_id, prompt_version)
+      );
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
@@ -122,6 +185,8 @@ export class KnowledgeStore {
       CREATE INDEX IF NOT EXISTS idx_notes_source ON notes(source_id, ordinal);
       CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_note_id);
       CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_note_id);
+      CREATE INDEX IF NOT EXISTS idx_note_concepts_concept ON note_concepts(concept_id);
+      CREATE INDEX IF NOT EXISTS idx_embeddings_model ON note_embeddings(model, representation_version);
     `);
     const sourceColumns = this.db.prepare("PRAGMA table_info(sources)").all() as Row[];
     if (!sourceColumns.some((column) => String(column.name) === "work_id")) {
@@ -389,6 +454,148 @@ export class KnowledgeStore {
       UPDATE notes SET core_idea = ?, context = ?, tags_json = ?, confidence = ?, status = 'enriched', model = ?, prompt_version = ?, updated_at = ?
       WHERE id = ?
     `).run(enrichment.coreIdea, enrichment.context, json(normalizeTags(enrichment.tags)), enrichment.confidence, model, promptVersion, now(), noteId);
+    this.db.prepare("DELETE FROM note_concepts WHERE note_id = ?").run(noteId);
+    this.db.prepare("DELETE FROM concept_selection_runs WHERE note_id = ?").run(noteId);
+    this.db.prepare("DELETE FROM note_embeddings WHERE note_id = ?").run(noteId);
+  }
+
+  enrichedNotes(): NoteRecord[] {
+    return this.listNotes().filter((note) => note.status === "enriched" || note.status === "reviewed");
+  }
+
+  listConcepts(): ConceptRecord[] {
+    return (this.db.prepare("SELECT * FROM concepts WHERE status = 'active' ORDER BY preferred_label").all() as Row[]).map((row) => this.mapConcept(row));
+  }
+
+  conceptsForNote(noteId: string): ConceptRecord[] {
+    return (this.db.prepare(`
+      SELECT concepts.* FROM note_concepts JOIN concepts ON concepts.id = note_concepts.concept_id
+      WHERE note_concepts.note_id = ? AND concepts.status = 'active' ORDER BY concepts.preferred_label
+    `).all(noteId) as Row[]).map((row) => this.mapConcept(row));
+  }
+
+  notesNeedingConcepts(promptVersion: string, limit = 100): NoteRecord[] {
+    const rows = this.db.prepare(`
+      SELECT notes.* FROM notes
+      WHERE notes.status IN ('enriched', 'reviewed') AND NOT EXISTS (
+        SELECT 1 FROM concept_selection_runs WHERE concept_selection_runs.note_id = notes.id AND concept_selection_runs.prompt_version = ?
+      ) ORDER BY notes.created_at, notes.ordinal LIMIT ?
+    `).all(promptVersion, limit) as Row[];
+    return rows.map((row) => this.mapNote(row));
+  }
+
+  conceptCandidates(note: NoteRecord, limit = 80): ConceptRecord[] {
+    const concepts = this.listConcepts();
+    if (concepts.length <= limit) return concepts;
+    const tokens = new Set(normalizeConceptLabel(`${note.coreIdea ?? ""} ${note.context ?? ""} ${note.tags.join(" ")}`).split(" ").filter((token) => token.length > 2));
+    return concepts.map((concept) => {
+      const labels = normalizeConceptLabel(`${concept.preferredLabel} ${concept.aliases.join(" ")} ${concept.definition}`).split(" ");
+      return { concept, score: labels.reduce((score, token) => score + (tokens.has(token) ? 1 : 0), 0) };
+    }).sort((left, right) => right.score - left.score || left.concept.preferredLabel.localeCompare(right.concept.preferredLabel)).slice(0, limit).map(({ concept }) => concept);
+  }
+
+  replaceNoteConcepts(noteId: string, selection: ConceptSelection, model: string, promptVersion: string): number {
+    const timestamp = now();
+    const assignments = new Map<string, { confidence: number; evidence: string }>();
+    for (const selected of selection.existing) {
+      const exists = this.db.prepare("SELECT id FROM concepts WHERE id = ? AND status = 'active'").get(selected.conceptId);
+      if (exists) assignments.set(selected.conceptId, { confidence: selected.confidence, evidence: selected.evidence });
+    }
+    for (const proposal of selection.proposed) {
+      const identityKey = normalizeConceptLabel(proposal.preferredLabel);
+      if (!identityKey) continue;
+      const existing = this.db.prepare("SELECT * FROM concepts WHERE identity_key = ?").get(identityKey) as Row | undefined;
+      const conceptId = existing ? String(existing.id) : randomUUID();
+      if (!existing) this.db.prepare(`
+        INSERT INTO concepts (id, preferred_label, identity_key, aliases_json, definition, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
+      `).run(conceptId, identityKey, identityKey, json(proposal.aliases.filter((alias) => normalizeConceptLabel(alias) !== identityKey)), proposal.definition, timestamp, timestamp);
+      assignments.set(conceptId, { confidence: proposal.confidence, evidence: proposal.evidence });
+    }
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("DELETE FROM note_concepts WHERE note_id = ?").run(noteId);
+      const insert = this.db.prepare(`
+        INSERT INTO note_concepts (note_id, concept_id, confidence, evidence, model, prompt_version, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const [conceptId, assignment] of assignments) insert.run(noteId, conceptId, assignment.confidence, assignment.evidence, model, promptVersion, timestamp);
+      this.db.prepare(`INSERT OR REPLACE INTO concept_selection_runs (note_id, prompt_version, model, created_at) VALUES (?, ?, ?, ?)`)
+        .run(noteId, promptVersion, model, timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return assignments.size;
+  }
+
+  embedding(noteId: string, model: string, representationVersion = EMBEDDING_VERSION): { inputHash: string; vector: number[] } | undefined {
+    const row = this.db.prepare("SELECT input_hash, vector_json FROM note_embeddings WHERE note_id = ? AND model = ? AND representation_version = ?")
+      .get(noteId, model, representationVersion) as Row | undefined;
+    return row ? { inputHash: String(row.input_hash), vector: parseJson<number[]>(row.vector_json, []) } : undefined;
+  }
+
+  storeEmbedding(noteId: string, model: string, inputHash: string, vector: number[], representationVersion = EMBEDDING_VERSION): void {
+    this.db.prepare(`
+      INSERT INTO note_embeddings (note_id, model, representation_version, input_hash, dimensions, vector_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(note_id, model, representation_version) DO UPDATE SET input_hash = excluded.input_hash,
+        dimensions = excluded.dimensions, vector_json = excluded.vector_json, created_at = excluded.created_at
+    `).run(noteId, model, representationVersion, inputHash, vector.length, json(vector), now());
+    this.setSetting("embedding.model", model);
+  }
+
+  conceptEmbedding(conceptId: string, model: string, representationVersion = EMBEDDING_VERSION): { inputHash: string; vector: number[] } | undefined {
+    const row = this.db.prepare("SELECT input_hash, vector_json FROM concept_embeddings WHERE concept_id = ? AND model = ? AND representation_version = ?")
+      .get(conceptId, model, representationVersion) as Row | undefined;
+    return row ? { inputHash: String(row.input_hash), vector: parseJson<number[]>(row.vector_json, []) } : undefined;
+  }
+
+  storeConceptEmbedding(conceptId: string, model: string, inputHash: string, vector: number[], representationVersion = EMBEDDING_VERSION): void {
+    this.db.prepare(`
+      INSERT INTO concept_embeddings (concept_id, model, representation_version, input_hash, dimensions, vector_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(concept_id, model, representation_version) DO UPDATE SET input_hash = excluded.input_hash,
+        dimensions = excluded.dimensions, vector_json = excluded.vector_json, created_at = excluded.created_at
+    `).run(conceptId, model, representationVersion, inputHash, vector.length, json(vector), now());
+  }
+
+  conceptMaintenanceCandidates(model: string, limit = 20): Array<[ConceptRecord, ConceptRecord]> {
+    const concepts = this.listConcepts();
+    const embeddings = new Map<string, number[]>((this.db.prepare(`
+      SELECT concept_id, vector_json FROM concept_embeddings WHERE model = ? AND representation_version = ?
+    `).all(model, EMBEDDING_VERSION) as Row[]).map((row) => [String(row.concept_id), parseJson<number[]>(row.vector_json, [])]));
+    const scored: Array<{ left: ConceptRecord; right: ConceptRecord; score: number }> = [];
+    for (let leftIndex = 0; leftIndex < concepts.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < concepts.length; rightIndex += 1) {
+        const left = concepts[leftIndex];
+        const right = concepts[rightIndex];
+        if (!left || !right) continue;
+        const [firstId, secondId] = left.id.localeCompare(right.id) <= 0 ? [left.id, right.id] : [right.id, left.id];
+        const existing = this.db.prepare(`SELECT 1 FROM concept_merge_proposals WHERE left_concept_id = ? AND right_concept_id = ?`).get(firstId, secondId);
+        if (existing) continue;
+        const leftTokens = new Set(normalizeConceptLabel(`${left.preferredLabel} ${left.aliases.join(" ")}`).split(" "));
+        const rightTokens = new Set(normalizeConceptLabel(`${right.preferredLabel} ${right.aliases.join(" ")}`).split(" "));
+        const shared = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+        const lexicalScore = shared / Math.max(1, new Set([...leftTokens, ...rightTokens]).size);
+        const leftVector = embeddings.get(left.id);
+        const rightVector = embeddings.get(right.id);
+        const semanticScore = leftVector && rightVector ? cosineSimilarity(leftVector, rightVector) : 0;
+        const score = Math.max(lexicalScore, semanticScore);
+        if (lexicalScore >= 0.25 || semanticScore >= 0.72) scored.push({ left, right, score });
+      }
+    }
+    return scored.sort((a, b) => b.score - a.score).slice(0, limit).map(({ left, right }) => [left, right]);
+  }
+
+  addConceptMergeProposal(left: ConceptRecord, right: ConceptRecord, evaluation: { recommendation: string; confidence: number; rationale: string }, model: string, promptVersion: string): void {
+    const [first, second] = left.id.localeCompare(right.id) <= 0 ? [left, right] : [right, left];
+    this.db.prepare(`
+      INSERT OR IGNORE INTO concept_merge_proposals
+        (id, left_concept_id, right_concept_id, recommendation, confidence, rationale, status, model, prompt_version, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?)
+    `).run(randomUUID(), first.id, second.id, evaluation.recommendation, evaluation.confidence, evaluation.rationale, model, promptVersion, now());
   }
 
   failNote(noteId: string): void {
@@ -412,9 +619,9 @@ export class KnowledgeStore {
     `).run(key, value, now());
   }
 
-  replaceDerivedEdges(): number {
-    const notes = this.listNotes().filter((note) => note.status === "enriched" || note.status === "reviewed");
-    this.db.prepare("DELETE FROM edges WHERE type IN ('source_sequence', 'capture_sequence', 'shared_tag')").run();
+  replaceDerivedEdges(options: { embeddingModel?: string; semanticTopK?: number; withinWorkThreshold?: number; crossWorkThreshold?: number } = {}): number {
+    const notes = this.enrichedNotes();
+    this.db.prepare("DELETE FROM edges WHERE type IN ('source_sequence', 'work_sequence', 'capture_sequence', 'explicit_reference', 'shared_tag', 'semantic_similarity')").run();
     const insert = this.db.prepare(`
       INSERT OR IGNORE INTO edges (id, from_note_id, to_note_id, type, weight, evidence, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -433,11 +640,25 @@ export class KnowledgeStore {
         }
       }
     }
-    const sourceMetadata = new Map<string, Record<string, unknown>>(
-      (this.db.prepare("SELECT id, metadata_json FROM sources").all() as Row[]).map((row) => [
-        String(row.id), parseJson<Record<string, unknown>>(row.metadata_json, {}),
-      ]),
-    );
+    const sourceRows = this.db.prepare("SELECT * FROM sources").all() as Row[];
+    const sourceMetadata = new Map<string, Record<string, unknown>>(sourceRows.map((row) => [String(row.id), parseJson<Record<string, unknown>>(row.metadata_json, {})]));
+    const sourceWork = new Map(sourceRows.map((row) => [String(row.id), row.work_id === null ? null : String(row.work_id)]));
+    const sourceCapturedAt = new Map(sourceRows.map((row) => [String(row.id), String(row.captured_at)]));
+    const workGroups = new Map<string, NoteRecord[]>();
+    for (const note of notes) {
+      const workId = sourceWork.get(note.sourceId);
+      if (workId) workGroups.set(workId, [...(workGroups.get(workId) ?? []), note]);
+    }
+    for (const [workId, group] of workGroups) {
+      group.sort((left, right) => sourceCapturedAt.get(left.sourceId)!.localeCompare(sourceCapturedAt.get(right.sourceId)!) || Number(sourceMetadata.get(left.sourceId)?.telegramMessageId ?? 0) - Number(sourceMetadata.get(right.sourceId)?.telegramMessageId ?? 0) || left.ordinal - right.ordinal);
+      for (let index = 1; index < group.length; index += 1) {
+        const left = group[index - 1];
+        const right = group[index];
+        if (!left || !right || left.sourceId === right.sourceId) continue;
+        insert.run(randomUUID(), left.id, right.id, "work_sequence", 1, `Consecutive atomic notes within work ${workId}`, now());
+        count += 1;
+      }
+    }
     const captureGroups = new Map<string, NoteRecord[]>();
     for (const note of notes) {
       const metadata = sourceMetadata.get(note.sourceId);
@@ -460,49 +681,70 @@ export class KnowledgeStore {
         count += 1;
       }
     }
-    const notesById = new Map(notes.map((note) => [note.id, note]));
-    const notesByTag = new Map<string, string[]>();
+    const noteForSource = new Map(notes.map((note) => [note.sourceId, note]));
     for (const note of notes) {
-      for (const tag of note.tags) notesByTag.set(tag, [...(notesByTag.get(tag) ?? []), note.id]);
+      const groupSources = note.captureGroupId ? this.db.prepare("SELECT source_id FROM capture_group_sources WHERE capture_group_id = ?").all(note.captureGroupId) as Row[] : [];
+      for (const row of groupSources) noteForSource.set(String(row.source_id), note);
     }
-    const candidates = new Map<string, Set<string>>();
-    for (const [tag, ids] of notesByTag) {
-      for (let i = 0; i < ids.length; i += 1) {
-        for (let j = i + 1; j < ids.length; j += 1) {
-          const pair = [ids[i], ids[j]].filter((id): id is string => Boolean(id)).sort();
-          if (pair.length !== 2) continue;
-          const key = `${pair[0]}\0${pair[1]}`;
-          const shared = candidates.get(key) ?? new Set<string>();
-          shared.add(tag);
-          candidates.set(key, shared);
+    const sourceByTelegramMessage = new Map<string, string>();
+    for (const [sourceId, metadata] of sourceMetadata) {
+      const chatId = metadata.telegramChatId;
+      const messageId = metadata.telegramMessageId;
+      if (chatId !== undefined && messageId !== undefined) sourceByTelegramMessage.set(`${chatId}:${messageId}`, sourceId);
+    }
+    for (const [sourceId, metadata] of sourceMetadata) {
+      const replyId = metadata.telegramReplyToMessageId;
+      if (replyId === undefined) continue;
+      const targetSourceId = sourceByTelegramMessage.get(`${metadata.telegramChatId}:${replyId}`);
+      const from = noteForSource.get(sourceId);
+      const target = targetSourceId ? noteForSource.get(targetSourceId) : undefined;
+      if (!from || !target || from.id === target.id) continue;
+      insert.run(randomUUID(), from.id, target.id, "explicit_reference", 1, `Telegram reply to message ${replyId}`, now());
+      count += 1;
+    }
+    const embeddingModel = options.embeddingModel ?? this.getSetting("embedding.model");
+    if (embeddingModel) {
+      const embeddings = new Map<string, number[]>((this.db.prepare(`
+        SELECT note_id, vector_json FROM note_embeddings WHERE model = ? AND representation_version = ?
+      `).all(embeddingModel, EMBEDDING_VERSION) as Row[]).map((row) => [String(row.note_id), parseJson<number[]>(row.vector_json, [])]));
+      const topK = options.semanticTopK ?? 4;
+      const ranked = new Map<string, Array<{ id: string; score: number }>>();
+      for (const left of notes) {
+        const leftVector = embeddings.get(left.id);
+        if (!leftVector) continue;
+        const matches: Array<{ id: string; score: number }> = [];
+        for (const right of notes) {
+          if (left.id === right.id) continue;
+          const rightVector = embeddings.get(right.id);
+          if (!rightVector) continue;
+          const sameWork = sourceWork.get(left.sourceId) !== null && sourceWork.get(left.sourceId) === sourceWork.get(right.sourceId);
+          const score = cosineSimilarity(leftVector, rightVector);
+          const threshold = sameWork ? options.withinWorkThreshold ?? 0.42 : options.crossWorkThreshold ?? 0.52;
+          if (score >= threshold) matches.push({ id: right.id, score });
+        }
+        ranked.set(left.id, matches.sort((a, b) => b.score - a.score).slice(0, topK));
+      }
+      const added = new Set<string>();
+      for (const [leftId, matches] of ranked) {
+        for (const match of matches) {
+          if (!ranked.get(match.id)?.some((candidate) => candidate.id === leftId)) continue;
+          const pair = [leftId, match.id].sort();
+          const key = pair.join("\0");
+          if (added.has(key) || !pair[0] || !pair[1]) continue;
+          added.add(key);
+          const reciprocal = ranked.get(match.id)?.find((candidate) => candidate.id === leftId)?.score ?? match.score;
+          const score = (match.score + reciprocal) / 2;
+          insert.run(randomUUID(), pair[0], pair[1], "semantic_similarity", score, `Mutual top-${topK} semantic similarity ${score.toFixed(3)} using ${embeddingModel}`, now());
+          count += 1;
         }
       }
-    }
-    const scoredCandidates: Array<{ left: NoteRecord; right: NoteRecord; shared: string[]; weight: number }> = [];
-    for (const [key, sharedSet] of candidates) {
-      const [leftId, rightId] = key.split("\0");
-      const left = leftId ? notesById.get(leftId) : undefined;
-      const right = rightId ? notesById.get(rightId) : undefined;
-      if (!left || !right) continue;
-      const shared = [...sharedSet];
-      const weight = shared.length / new Set([...left.tags, ...right.tags]).size;
-      if (weight >= 0.1) scoredCandidates.push({ left, right, shared, weight });
-    }
-    const semanticDegree = new Map<string, number>();
-    scoredCandidates.sort((a, b) => b.weight - a.weight);
-    for (const candidate of scoredCandidates) {
-      if ((semanticDegree.get(candidate.left.id) ?? 0) >= 4 || (semanticDegree.get(candidate.right.id) ?? 0) >= 4) continue;
-      insert.run(randomUUID(), candidate.left.id, candidate.right.id, "shared_tag", candidate.weight, `Shared tags: ${candidate.shared.join(", ")}`, now());
-      semanticDegree.set(candidate.left.id, (semanticDegree.get(candidate.left.id) ?? 0) + 1);
-      semanticDegree.set(candidate.right.id, (semanticDegree.get(candidate.right.id) ?? 0) + 1);
-      count += 1;
     }
     return count;
   }
 
   stats(): Record<string, number> {
     const getCount = (table: string) => Number((this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as Row).count);
-    const result: Record<string, number> = { works: getCount("works"), sources: getCount("sources"), notes: getCount("notes"), edges: getCount("edges") };
+    const result: Record<string, number> = { works: getCount("works"), sources: getCount("sources"), notes: getCount("notes"), concepts: getCount("concepts"), note_embeddings: getCount("note_embeddings"), concept_embeddings: getCount("concept_embeddings"), edges: getCount("edges") };
     const statuses = this.db.prepare("SELECT status, COUNT(*) AS count FROM notes GROUP BY status").all() as Row[];
     for (const row of statuses) result[`notes_${String(row.status)}`] = Number(row.count);
     return result;
@@ -510,11 +752,14 @@ export class KnowledgeStore {
 
   exportGraph(): GraphExport {
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       exportedAt: now(),
       works: this.listWorks(),
       sources: (this.db.prepare("SELECT * FROM sources ORDER BY created_at").all() as Row[]).map((row) => this.mapSource(row)),
       notes: this.listNotes(),
+      concepts: this.listConcepts(),
+      noteConcepts: (this.db.prepare("SELECT * FROM note_concepts ORDER BY created_at").all() as Row[]).map((row) => this.mapNoteConcept(row)),
+      conceptMergeProposals: (this.db.prepare("SELECT * FROM concept_merge_proposals ORDER BY created_at").all() as Row[]).map((row) => this.mapConceptMergeProposal(row)),
       edges: (this.db.prepare("SELECT * FROM edges ORDER BY created_at").all() as Row[]).map((row) => this.mapEdge(row)),
     };
   }
@@ -546,6 +791,29 @@ export class KnowledgeStore {
     return {
       id: String(row.id), fromNoteId: String(row.from_note_id), toNoteId: String(row.to_note_id), type: String(row.type) as EdgeType,
       weight: Number(row.weight), evidence: String(row.evidence), createdAt: String(row.created_at),
+    };
+  }
+
+  private mapConcept(row: Row): ConceptRecord {
+    return {
+      id: String(row.id), preferredLabel: String(row.preferred_label), aliases: parseJson<string[]>(row.aliases_json, []), definition: String(row.definition),
+      status: String(row.status) as ConceptRecord["status"], mergedIntoId: row.merged_into_id === null ? null : String(row.merged_into_id),
+      createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+    };
+  }
+
+  private mapNoteConcept(row: Row): NoteConceptRecord {
+    return {
+      noteId: String(row.note_id), conceptId: String(row.concept_id), confidence: Number(row.confidence), evidence: String(row.evidence),
+      model: String(row.model), promptVersion: String(row.prompt_version), createdAt: String(row.created_at),
+    };
+  }
+
+  private mapConceptMergeProposal(row: Row): ConceptMergeProposalRecord {
+    return {
+      id: String(row.id), leftConceptId: String(row.left_concept_id), rightConceptId: String(row.right_concept_id),
+      recommendation: String(row.recommendation) as ConceptMergeProposalRecord["recommendation"], confidence: Number(row.confidence), rationale: String(row.rationale),
+      status: String(row.status) as ConceptMergeProposalRecord["status"], model: String(row.model), promptVersion: String(row.prompt_version), createdAt: String(row.created_at),
     };
   }
 

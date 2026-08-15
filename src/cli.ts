@@ -4,6 +4,8 @@ import { dirname, resolve } from "node:path";
 import { loadEnvFile } from "node:process";
 import { parseArgs } from "node:util";
 import { HeuristicEnricher, OpenAICompatibleEnricher } from "./enrichment.js";
+import { HeuristicConceptSelector, OpenAIConceptMaintenanceEvaluator, OpenAIConceptSelector } from "./concepts.js";
+import { MiniLmEmbedder } from "./embeddings.js";
 import { extractFile } from "./extractors.js";
 import { processPending, type ProcessProgress } from "./pipeline.js";
 import { PROMPT_VERSION } from "./enrichment.js";
@@ -49,6 +51,7 @@ async function main(): Promise<void> {
   });
   const dbPath = resolve(values.db ?? ".dkn/knowledge.sqlite");
   const store = new KnowledgeStore(dbPath);
+  let activeEmbedder: MiniLmEmbedder | undefined;
   try {
     if (command === "init") {
       console.log(JSON.stringify({ database: dbPath, initialized: true }, null, 2));
@@ -68,7 +71,20 @@ async function main(): Promise<void> {
         apiKey: process.env.DKN_LLM_API_KEY ?? "local",
         model: process.env.DKN_LLM_MODEL ?? "LiquidAI/LFM2.5-2.6B",
       }) : (() => { throw new Error(`Unknown provider: ${provider}`); })();
-      const result = await processPending(store, enricher, limit, { onProgress: reportProcessProgress });
+      const llmOptions = {
+        baseUrl: process.env.DKN_LLM_BASE_URL ?? "http://127.0.0.1:8080/v1",
+        apiKey: process.env.DKN_LLM_API_KEY ?? "local",
+        model: process.env.DKN_LLM_MODEL ?? "LiquidAI/LFM2.5-2.6B",
+      };
+      activeEmbedder = new MiniLmEmbedder(process.env.DKN_EMBEDDING_MODEL, resolve(".dkn/models/transformers"));
+      const result = await processPending(store, enricher, limit, {
+        onProgress: reportProcessProgress,
+        knowledge: {
+          selector: provider === "openai" ? new OpenAIConceptSelector(llmOptions) : new HeuristicConceptSelector(),
+          embedder: activeEmbedder,
+          ...(provider === "openai" ? { maintenance: new OpenAIConceptMaintenanceEvaluator(llmOptions) } : {}),
+        },
+      });
       console.log(JSON.stringify({ requeued, ...result }, null, 2));
     } else if (command === "telegram") {
       const client = new TelegramClient(process.env.TELEGRAM_BOT_TOKEN ?? "");
@@ -93,6 +109,7 @@ async function main(): Promise<void> {
       throw new Error(`Unknown command '${command}'\n\n${usage}`);
     }
   } finally {
+    await activeEmbedder?.dispose();
     store.close();
   }
 }
@@ -108,6 +125,21 @@ function reportProcessProgress(progress: ProcessProgress): void {
     console.log(`[process ${progress.current}/${progress.total}] Completed ${progress.noteId.slice(0, 8)} in ${formatElapsed(progress.elapsedMs)}.`);
   } else if (progress.phase === "note-failed") {
     console.error(`[process ${progress.current}/${progress.total}] Failed ${progress.noteId.slice(0, 8)} after ${formatElapsed(progress.elapsedMs)}: ${progress.error}`);
+  } else if (progress.phase === "concept-start") {
+    console.log(`[concepts ${progress.current}/${progress.total}] Selecting controlled concepts for ${progress.noteId?.slice(0, 8)}...`);
+  } else if (progress.phase === "concept-complete") {
+    console.log(`[concepts ${progress.current}/${progress.total}] Assigned concepts in ${formatElapsed(progress.elapsedMs)}.`);
+  } else if (progress.phase === "embedding-start") {
+    console.log(`[embeddings] Creating ${progress.total} semantic vector${progress.total === 1 ? "" : "s"}...`);
+  } else if (progress.phase === "model-download") {
+    const percent = progress.progress === undefined ? "" : ` ${progress.progress.toFixed(0)}%`;
+    console.log(`[embeddings] Model ${progress.label}${percent}`);
+  } else if (progress.phase === "embedding-complete") {
+    console.log(`[embeddings ${progress.current}/${progress.total}] Stored ${progress.noteId?.slice(0, 8)}.`);
+  } else if (progress.phase === "maintenance-start") {
+    console.log(`[concept maintenance ${progress.current}/${progress.total}] Evaluating ${progress.label}...`);
+  } else if (progress.phase === "maintenance-complete") {
+    console.log(`[concept maintenance ${progress.current}/${progress.total}] Proposal recorded in ${formatElapsed(progress.elapsedMs)}.`);
   } else if (progress.phase === "complete") {
     console.log(`[process] Finished ${progress.processed}/${progress.total}; ${progress.failed} failed; ${progress.edges} graph edges (${formatElapsed(progress.elapsedMs)}).`);
   }
