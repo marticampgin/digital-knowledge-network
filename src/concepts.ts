@@ -1,7 +1,7 @@
 import type { ConceptRecord, ConceptSelection, EnrichmentContext, NoteRecord } from "./domain.js";
 import { OpenAICompatibleJsonClient, parseJsonObject, type JsonTask, type OpenAICompatibleOptions } from "./llm.js";
 
-export const CONCEPT_SELECTION_PROMPT_VERSION = "concept-selection-v3";
+export const CONCEPT_SELECTION_PROMPT_VERSION = "concept-selection-v4";
 export const CONCEPT_MAINTENANCE_PROMPT_VERSION = "concept-maintenance-v1";
 
 export interface ConceptSelector {
@@ -30,7 +30,7 @@ export class HeuristicConceptSelector implements ConceptSelector {
     const byLabel = new Map(candidates.flatMap((concept) => [concept.preferredLabel, ...concept.aliases].map((label) => [normalizeConceptLabel(label), concept] as const)));
     const existing = [];
     const proposed = [];
-    for (const tag of note.tags.slice(0, 6)) {
+    for (const tag of note.tags.slice(0, 1)) {
       const match = byLabel.get(normalizeConceptLabel(tag));
       if (match) existing.push({ conceptId: match.id, confidence: 0.7, evidence: `Matches generated tag “${tag}”` });
       else proposed.push({ preferredLabel: normalizeConceptLabel(tag), definition: `Concept represented by the note’s “${tag}” tag.`, aliases: [], confidence: 0.5, evidence: `Generated tag “${tag}”` });
@@ -61,10 +61,10 @@ export class OpenAIConceptSelector implements ConceptSelector {
       schema: {
         type: "object",
         properties: {
-          existing: { type: "array", maxItems: 3, items: { type: "object", properties: {
+          existing: { type: "array", maxItems: 1, items: { type: "object", properties: {
             conceptId: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 1 }, evidence: { type: "string" },
           }, required: ["conceptId", "confidence", "evidence"], additionalProperties: false } },
-          proposed: { type: "array", maxItems: 2, items: { type: "object", properties: {
+          proposed: { type: "array", maxItems: 1, items: { type: "object", properties: {
             preferredLabel: { type: "string" }, definition: { type: "string" }, aliases: { type: "array", items: { type: "string" }, maxItems: 5 },
             confidence: { type: "number", minimum: 0, maximum: 1 }, evidence: { type: "string" },
           }, required: ["preferredLabel", "definition", "aliases", "confidence", "evidence"], additionalProperties: false } },
@@ -72,7 +72,7 @@ export class OpenAIConceptSelector implements ConceptSelector {
         required: ["existing", "proposed"],
         additionalProperties: false,
       },
-      system: `You are the concept-selection task in a personal knowledge system. Analyze exactly one atomic note. The registry contains only retrieved candidates, not mandatory choices. Reuse a candidate only when its definition directly matches a central idea in this note; never select it merely because it concerns the same book, company, person, or broad topic. Concept IDs must be copied exactly. Propose a new concept only when no candidate genuinely captures an important idea. Concepts should be reusable intellectual ideas, mechanisms, practices, or phenomena—not people, book titles, generic words, sentence fragments, or near-duplicates. Assign 1-3 precise concepts in total. A new preferred label is lowercase natural language without underscores. Definitions must distinguish the concept from nearby concepts. Each evidence string must identify the note text supporting that specific assignment. Do not merge, rename, or evaluate the registry; that belongs to a separate maintenance task. Return JSON only.`,
+      system: `You are the primary-concept selection task in a personal knowledge system. Analyze exactly one atomic note and return exactly one primary concept in total. If one retrieved candidate directly names the note's central idea, return it in existing and leave proposed empty. Otherwise leave existing empty and propose exactly one new concept. Never return both. Never select a candidate merely because it concerns the same book, company, person, or broad topic. Concept IDs must be copied exactly. A concept should be a reusable intellectual idea, mechanism, practice, or phenomenon—not a person, book title, generic word, or sentence fragment. A new preferred label is lowercase natural language without underscores. Its definition must distinguish it from nearby concepts. Evidence must identify text supporting this specific assignment. Do not merge, rename, or evaluate the registry; that belongs to a separate maintenance task. Return JSON only.`,
       user: `SOURCE\n${work}\n\nATOMIC NOTE\nCore idea: ${note.coreIdea ?? ""}\nContext: ${note.context ?? ""}\nCanonical text: ${note.rawText}\n\nCURRENT CONCEPT REGISTRY\n${registry}`,
       maxTokens: 2048,
     };
@@ -143,7 +143,8 @@ export function parseConceptSelection(content: string, allowedIds: Set<string>):
       evidence: clean(candidate.evidence),
     }];
   }) : [];
-  return { existing, proposed };
+  if (existing.length) return { existing: [existing.sort((left, right) => right.confidence - left.confidence)[0]!], proposed: [] };
+  return { existing: [], proposed: proposed.length ? [proposed.sort((left, right) => right.confidence - left.confidence)[0]!] : [] };
 }
 
 export function normalizeConceptLabel(value: string): string {
@@ -163,7 +164,7 @@ async function completeWithJsonRetry<T>(client: OpenAICompatibleJsonClient, task
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const retryRequirement = attempt === 1
       ? "The previous response was invalid JSON. Return one concise, complete JSON object within the schema and output limit."
-      : "The previous responses were invalid JSON. Return at most 3 existing concepts and 2 proposed concepts. Keep every definition under 25 words and every evidence string under 20 words. Close every array and object.";
+      : "The previous responses were invalid JSON. Return exactly one concept total: one existing or one proposed, never both. Keep the definition under 25 words and evidence under 20 words. Close every array and object.";
     const request = attempt === 0 ? task : { ...task, user: `${task.user}\n\nRETRY REQUIREMENT\n${retryRequirement}` };
     try {
       return parse((await client.complete(request)).content);

@@ -67,9 +67,7 @@ describe("knowledge pipeline", () => {
 
   it("repairs local-model JSON syntax before validating concept IDs", () => {
     const malformed = '{"existing":[{"conceptId":"known","confidence":0.9,"evidence":"direct evidence"}],"proposed":[{"preferredLabel":"new idea","definition":"A reusable idea","aliases":[],"confidence":0.8,"evidence":"supported"}';
-    expect(parseConceptSelection(malformed, new Set(["known"]))).toMatchObject({
-      existing: [{ conceptId: "known" }], proposed: [{ preferredLabel: "new idea" }],
-    });
+    expect(parseConceptSelection(malformed, new Set(["known"]))).toMatchObject({ existing: [{ conceptId: "known" }], proposed: [] });
   });
 
   it("normalizes equivalent underscore and space tags without using tags as graph topology", () => {
