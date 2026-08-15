@@ -30,9 +30,9 @@ Telegram / files / screenshots / audio
 1. **Capture adapters** fetch inputs temporarily and preserve message ID, chat ID, timestamps, captions, and album/group IDs.
 2. **Extraction adapters** convert media to text. OCR and speech-to-text outputs become canonical source evidence and retain confidence/page/time spans; temporary media files are then deleted.
 3. **Segmentation** groups adjacent screenshots or text blocks into candidate atomic notes. It must be reversible because page proximity is a hint, not truth.
-4. **Enrichment** produces a self-contained core idea, limited supporting context, controlled tags, and a confidence score. The model output never replaces raw text.
-5. **Review** records accept/edit/reject decisions. Low-confidence extraction or enrichment enters a queue.
-6. **Graph derivation** creates typed edges. Source order, shared tags, semantic similarity, and explicit references are different relationships and must not be collapsed into a generic “related” edge.
+4. **Enrichment** produces a self-contained core idea, limited supporting context, descriptive tags, and a confidence score. The model output never replaces raw text.
+5. **Concept selection** assigns exactly one primary concept, reusing the retrieved registry candidate only when it fits and otherwise proposing one genuinely new concept. A separate maintenance task evaluates aliases and merge candidates.
+6. **Graph derivation** creates typed edges. Source/work order, explicit replies, and semantic similarity remain visibly different relationships and must not be collapsed into a generic “related” edge.
 7. **Consumers** include a graph explorer, search/RAG, exports, and a future agent-callable synchronization tool.
 
 ## Storage decision
@@ -45,7 +45,7 @@ The initial schema keeps:
 - `notes`: extracted text plus separately stored enrichment and processing state;
 - `edges`: typed, weighted, evidenced relationships.
 
-Later migrations add extraction spans, revisions, model runs, review decisions, embeddings, collections/authors/books, and sync cursors. These are additions, not reasons to discard the core model.
+Later migrations add extraction spans, revisions, broader/narrower concept relations, user decisions on merge proposals, entities, claims, communities, summaries, and richer sync cursors. These are additions, not reasons to discard the core model.
 
 ## Model boundary
 

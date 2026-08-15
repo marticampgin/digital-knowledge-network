@@ -37,15 +37,25 @@ Extraction is adapter-based by file type. Text and Markdown are read directly; i
 
 ## Enrichment and graph construction
 
-The LLM receives source metadata, the number of grouped evidence captures, and the complete canonical passage. Temperature is `0.1`, output allowance is 2,048 tokens, and a strict JSON schema requires a core idea, context, 2–10 lowercase tags, and confidence. The active prompt is versioned as `atomic-passage-v2`; model and prompt version are recorded on each note.
+The generative model is shared infrastructure, not one undifferentiated agent. Three independent, versioned tasks call the same local OpenAI-compatible endpoint at temperature `0`, each with its own system prompt and strict JSON schema:
 
-Graph edges are rebuilt deterministically from enriched notes:
+- `atomic-note-enrichment` (`atomic-passage-v3`) produces the faithful core idea, context, descriptive tags, and confidence from canonical evidence;
+- `concept-selection` (`concept-selection-v4`) assigns exactly one primary controlled concept: it accepts the single retrieved candidate when it directly fits, otherwise it proposes one new concept;
+- `concept-maintenance` (`concept-maintenance-v1`) evaluates semantically similar concept pairs as merge, alias, or keep-separate proposals. It cannot assign concepts to notes or silently change the registry.
 
-- `source_sequence` connects adjacent atomic notes from the same source;
-- `capture_sequence` preserves order within Telegram media groups when separate notes exist;
-- `shared_tag` connects notes using Jaccard overlap of generated tags, with a minimum weight of `0.1` and a maximum semantic degree of four per node to limit graph clutter.
+The model, prompt version, confidence, and evidence are stored with derived records. Structured responses are repaired and retried when necessary; a note is not marked complete until it has one valid primary concept.
 
-The graph is therefore explainable and reproducible, but it is not yet embedding-based. Shared tags are model-derived signals rather than verified semantic truth.
+`Xenova/all-MiniLM-L6-v2` runs locally through Transformers.js and produces normalized 384-dimensional embeddings. The model is small, English-focused, and intended for sentence/paragraph semantic similarity. Model files are cached under `.dkn/models/transformers`; note and concept vectors are keyed by model, representation version, and input hash so unchanged material is not recomputed.
+
+Graph edges are rebuilt from two explicitly separated layers:
+
+- `source_sequence` connects adjacent atomic notes from the same captured source;
+- `work_sequence` connects adjacent atomic notes within the same registered book, article, audio work, or other source container;
+- `capture_sequence` preserves order when a capture group contains separate notes;
+- `explicit_reference` preserves Telegram replies;
+- `semantic_similarity` retains calibrated mutual top-four embedding neighbors, using separate within-work and cross-work thresholds.
+
+Free-form tags remain visible browsing facets but no longer determine topology. Provenance edges are factual; semantic edges are model-derived candidates and store their model, score, and selection rule in human-readable evidence. Concept definitions are embedded separately to retrieve plausible alias/merge candidates for the maintenance task.
 
 ## Application boundary
 
@@ -57,4 +67,4 @@ CLI commands cover database initialization, file ingestion, Telegram discovery/s
 
 The intended default processing path is local. `.env`, the SQLite database, model weights, and temporary media are Git-ignored. Telegram itself remains an external transport, and any future remote QA must be explicit rather than part of routine processing.
 
-Current limitations are deliberate: English-only OCR/transcription, no reliable original screenshot timestamp, no embeddings, no work-level summaries, no source-reassignment UI, and no external QA workflow. SQLite remains appropriate until graph scale or traversal requirements justify a dedicated graph store. The replaceable extraction and LLM adapters allow those capabilities to evolve without changing the provenance-centered data model.
+Current limitations are deliberate: English-only OCR/transcription, no reliable original screenshot timestamp, embedding thresholds still need a user-labeled evaluation set, merge proposals are stored but not automatically applied, and work-level summaries, source reassignment, and external QA are not yet implemented. SQLite remains appropriate until graph scale or traversal requirements justify a dedicated graph store.

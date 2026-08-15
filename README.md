@@ -17,10 +17,10 @@ The project deliberately separates **capture**, **extraction**, **grouping**, **
 - Deduplicate imports by content hash.
 - Enrich notes either with a deterministic offline baseline or any OpenAI-compatible local model server.
 - Store sources, notes, provenance, model/prompt metadata, and typed graph edges in local SQLite.
-- Explore the graph through a responsive dark canvas with pan, zoom, fit, search, filters, visible tags, import, and source inspection.
+- Explore a responsive low-poly graph with pan, zoom, fit, search, typed relationship filters, controlled concepts, visible tags, import, and source inspection.
 - Export a stable JSON graph for another client or agent tool.
 
-Semantic embeddings, screenshot grouping/merge controls, and optional remote QA remain future work.
+The graph combines provenance edges with local MiniLM semantic neighbors. Threshold evaluation, applying concept-merge proposals, screenshot grouping controls, summaries, and optional remote QA remain future work.
 
 ## Quick start
 

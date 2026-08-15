@@ -2,7 +2,7 @@
 
 ## Assessment of the current graph
 
-The current graph is useful as an MVP visualization, but it is not a reliable long-term knowledge model. Notes are connected by source/capture sequence when available and otherwise by Jaccard overlap of LLM-generated tags. Shared-tag edges have a minimum score and a four-edge degree cap.
+The original MVP used source/capture sequence plus Jaccard overlap of LLM-generated tags. The current implementation replaces that topology with the first provenance-first hybrid layer described below: work/source/reply structure, a controlled concept registry, and mutual-nearest-neighbor embeddings.
 
 This is explainable and inexpensive, but it has structural weaknesses:
 
@@ -25,7 +25,7 @@ Always retain deterministic relationships: note-to-capture, capture-to-work, alb
 
 ### 2. Controlled concept layer
 
-Replace isolated tag strings with concept records. Each concept has a stable ID, one preferred label, aliases, a short definition, provenance, and optional broader/narrower/related concepts. Existing concepts are supplied to the LLM through retrieval; the model selects them first and may propose a small number of new concepts. New proposals are canonicalized by lexical normalization and embedding similarity before creation.
+Replace isolated tag strings with concept records. Each concept has a stable ID, one preferred label, aliases, a short definition, provenance, and optional broader/narrower/related concepts. Every atomic note receives exactly one primary concept. Retrieval presents at most one semantically credible existing candidate to the selector; it either accepts that candidate or proposes exactly one new concept. New proposals are canonicalized by lexical normalization before creation, while a separate maintenance task can suggest aliases and merges without applying them automatically.
 
 This follows the SKOS distinction between concepts and their preferred, alternative, and hidden labels rather than treating every label spelling as a new concept. See the [W3C SKOS reference](https://www.w3.org/TR/skos-reference/).
 
@@ -68,4 +68,4 @@ Create a representative gold set of related and unrelated note pairs, including 
 - generic-concept dominance and degree distribution;
 - human judgments of explanation quality and unexpected discovery.
 
-The best next implementation is not a full GraphRAG clone. Add work-sequence edges and a concept registry first, then evaluate a small local embedding model on the existing corpus. Once semantic neighbors are measurably better than shared tags, introduce them as a separate edge type and only later add entity/claim extraction and community summaries.
+The implemented foundation is intentionally not a full GraphRAG clone: it now has work-sequence edges, explicit replies, a controlled concept registry, local MiniLM embeddings, and a separate semantic edge type. The next quality milestone is a small labeled neighbor set that calibrates within-work and cross-work thresholds. Entities, claims, communities, and summaries should follow only after that evaluation.

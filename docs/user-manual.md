@@ -61,13 +61,13 @@ Both long-running commands report live terminal progress. Telegram sync prints e
 
 Start the production application with `npm start` and open `http://127.0.0.1:4174`. For development, use `npm run app` and open `http://127.0.0.1:5173`.
 
-- **Network:** pan, zoom, fit, search, and filter the knowledge graph. Select a node to inspect its idea, tags, context, source, and connections.
+- **Network:** pan, zoom, fit, search, and filter the low-poly knowledge graph. Select a polygon node to inspect its idea, primary controlled concept, descriptive tags, source, and connections. Every atomic note has exactly one primary concept. Solid edges are provenance; dashed violet edges are semantic similarity.
 - **Sources:** browse notes as a list. Selecting one stays in Sources and opens its evidence panel.
 - **Canonical source text:** this is the stored original text, OCR result, or transcript. It is not rewritten by the LLM. Use **Copy source text** to copy it.
-- **LLM-generated fields:** Core Idea, Context, and Tags are interpretations and are visibly labeled. They never replace the canonical evidence.
+- **LLM-generated fields:** Core Idea, Context, and descriptive Tags are interpretations and are visibly labeled. They never replace canonical evidence. Concepts are selected by a separate task from a controlled registry.
 - **Import:** the top-bar Import action accepts text/Markdown, common image formats, and common English audio formats. Direct UI imports currently receive deterministic heuristic enrichment. To use local-LLM enrichment for a file, ingest it with `npm run dev -- ingest <path>`, then run the OpenAI-compatible processing command.
 
-Graph connections currently represent ordered notes from the same source/capture or shared LLM-generated tags. A connection is navigational evidence, not proof that two ideas are semantically equivalent.
+Graph connections distinguish what is known from what is inferred. Same-source, same-work order, capture order, and replies are provenance relationships. Dashed semantic links are mutual nearest neighbors produced by the local embedding model; their percentages are similarity scores, not proof that two claims are equivalent. Tags never create edges.
 
 ## Local data and recovery
 
@@ -75,4 +75,4 @@ The database, downloaded models, OCR cache, and temporary processing files live 
 
 If Telegram imports nothing, send a fresh message: Bot API updates expire after roughly 24 hours and the bot cannot read history from before it joined. If OCR or transcription fails, keep the original media outside the application and retry after improving the crop/audio or checking `npm run models:setup` and FFmpeg availability.
 
-Work summaries, manual source reassignment, semantic embeddings, and optional external QA are planned but not implemented yet.
+Work summaries, manual source reassignment, applying concept-merge proposals, threshold evaluation on a labeled personal dataset, and optional external QA remain planned.
