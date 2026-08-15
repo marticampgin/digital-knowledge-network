@@ -1,5 +1,5 @@
 import type { ConceptRecord, ConceptSelection, EnrichmentContext, NoteRecord } from "./domain.js";
-import { OpenAICompatibleJsonClient, parseJsonObject, type OpenAICompatibleOptions } from "./llm.js";
+import { OpenAICompatibleJsonClient, parseJsonObject, type JsonTask, type OpenAICompatibleOptions } from "./llm.js";
 
 export const CONCEPT_SELECTION_PROMPT_VERSION = "concept-selection-v1";
 export const CONCEPT_MAINTENANCE_PROMPT_VERSION = "concept-maintenance-v1";
@@ -54,7 +54,7 @@ export class OpenAIConceptSelector implements ConceptSelector {
       ? candidates.map((concept) => `${concept.id} | ${concept.preferredLabel} | aliases: ${concept.aliases.join(", ") || "none"} | ${concept.definition}`).join("\n")
       : "The registry is empty.";
     const work = context.work ? `${context.work.kind}: ${context.work.title}${context.work.author ? ` by ${context.work.author}` : ""}` : "Unassigned source";
-    const result = await this.client.complete({
+    const task: JsonTask = {
       task: "concept-selection",
       promptVersion: this.promptVersion,
       schemaName: "concept_selection",
@@ -74,9 +74,9 @@ export class OpenAIConceptSelector implements ConceptSelector {
       },
       system: `You are the concept-selection task in a personal knowledge system. Analyze exactly one atomic note. Reuse concepts from the supplied registry whenever their meaning fits; concept IDs must be copied exactly. Propose a new concept only when no existing concept genuinely captures the idea. Concepts should be reusable intellectual ideas, mechanisms, practices, or phenomena—not people, book titles, generic words, sentence fragments, or near-duplicates. Prefer 2-6 precise concepts. A new preferred label is lowercase natural language without underscores. Definitions must distinguish the concept from nearby concepts. Evidence must quote or closely point to the supplied note. Do not merge, rename, or evaluate the registry; that belongs to a separate maintenance task. Return JSON only.`,
       user: `SOURCE\n${work}\n\nATOMIC NOTE\nCore idea: ${note.coreIdea ?? ""}\nContext: ${note.context ?? ""}\nCanonical text: ${note.rawText}\n\nCURRENT CONCEPT REGISTRY\n${registry}`,
-      maxTokens: 1536,
-    });
-    return parseConceptSelection(result.content, new Set(candidates.map((candidate) => candidate.id)));
+      maxTokens: 2048,
+    };
+    return completeWithJsonRetry(this.client, task, (content) => parseConceptSelection(content, new Set(candidates.map((candidate) => candidate.id))));
   }
 }
 
@@ -91,7 +91,7 @@ export class OpenAIConceptMaintenanceEvaluator implements ConceptMaintenanceEval
   }
 
   async evaluate(left: ConceptRecord, right: ConceptRecord): Promise<MergeEvaluation> {
-    const result = await this.client.complete({
+    const task: JsonTask = {
       task: "concept-maintenance",
       promptVersion: this.promptVersion,
       schemaName: "concept_maintenance",
@@ -108,15 +108,17 @@ export class OpenAIConceptMaintenanceEvaluator implements ConceptMaintenanceEval
       system: `You are the concept-registry maintenance task. Compare exactly two existing concepts. Recommend “merge” only when they denote the same concept, “alias” when one label is simply an alternative name for the other, and “keep_separate” when they overlap but remain meaningfully distinct. Preserve useful conceptual distinctions. You do not assign concepts to notes and you never apply changes; you only produce an auditable proposal. Return JSON only.`,
       user: `CONCEPT A\nLabel: ${left.preferredLabel}\nAliases: ${left.aliases.join(", ") || "none"}\nDefinition: ${left.definition}\n\nCONCEPT B\nLabel: ${right.preferredLabel}\nAliases: ${right.aliases.join(", ") || "none"}\nDefinition: ${right.definition}`,
       maxTokens: 512,
-    });
-    const value = parseJsonObject(result.content);
-    const recommendation = value.recommendation;
-    if (recommendation !== "merge" && recommendation !== "alias" && recommendation !== "keep_separate") throw new Error("Invalid concept-maintenance recommendation");
-    return {
-      recommendation,
-      confidence: clamp(typeof value.confidence === "number" ? value.confidence : 0.5),
-      rationale: typeof value.rationale === "string" ? value.rationale.trim() : "",
     };
+    return completeWithJsonRetry(this.client, task, (content) => {
+      const value = parseJsonObject(content);
+      const recommendation = value.recommendation;
+      if (recommendation !== "merge" && recommendation !== "alias" && recommendation !== "keep_separate") throw new Error("Invalid concept-maintenance recommendation");
+      return {
+        recommendation,
+        confidence: clamp(typeof value.confidence === "number" ? value.confidence : 0.5),
+        rationale: typeof value.rationale === "string" ? value.rationale.trim() : "",
+      };
+    });
   }
 }
 
@@ -154,4 +156,17 @@ function clean(value: unknown): string {
 
 function clamp(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+async function completeWithJsonRetry<T>(client: OpenAICompatibleJsonClient, task: JsonTask, parse: (content: string) => T): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const request = attempt === 0 ? task : { ...task, user: `${task.user}\n\nRETRY REQUIREMENT\nThe previous response was invalid JSON. Return one concise, complete JSON object within the schema and output limit.` };
+    try {
+      return parse((await client.complete(request)).content);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
