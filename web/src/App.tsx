@@ -50,11 +50,11 @@ export default function App() {
   }
 
   return <main className="app-shell">
-    <Sidebar view={view} onChange={setView} onUtility={setMessage} />
+    <Sidebar view={view} onChange={setView} />
     <section className="workspace">
       <Toolbar search={search} onSearch={setSearch} source={source} relation={relation} onSource={setSource} onRelation={setRelation} onImport={(file) => void importFile(file)} busy={importing} />
       {view === "network" ? <GraphCanvas data={filtered} selectedId={selectedId} onSelect={(node) => setSelectedId(node?.id ?? null)} /> : <ListView view={view} nodes={graph.nodes} onSelect={(node) => setSelectedId(node.id)} />}
-      <div className="local-status"><i />Local · {graph.nodes.length} {graph.nodes.length === 1 ? "note" : "notes"}{isPending ? " · updating" : ""}</div>
+      <div className={`local-status view-${view}`}><i />Local · {graph.nodes.length} {graph.nodes.length === 1 ? "note" : "notes"}{isPending ? " · updating" : ""}</div>
       {(message || error) ? <div className="toast" role="status">{message ?? error}</div> : null}
     </section>
     {selected ? <Inspector node={selected} nodes={graph.nodes} links={graph.links} mode={view} onClose={() => setSelectedId(null)} onCopySource={() => {

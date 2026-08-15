@@ -23,11 +23,24 @@ button { color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 
 .app-shell { display: flex; width: 100%; height: 100%; background: var(--bg); }
-.sidebar { width: 177px; flex: 0 0 177px; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: linear-gradient(90deg, #080d15, #080f18); z-index: 4; }
-.brand { height: 88px; display: flex; align-items: center; justify-content: space-between; padding: 0 23px; border-bottom: 1px solid rgba(53, 72, 90, .18); color: #f7fbfd; font-size: 18px; font-weight: 600; letter-spacing: .22em; white-space: nowrap; }
-.brand svg { color: #778491; stroke-width: 1.4; }
+.sidebar { width: 190px; flex: 0 0 190px; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: linear-gradient(90deg, #080d15, #080f18); z-index: 4; transition: width .2s ease, flex-basis .2s ease; }
+.sidebar.collapsed { width: 68px; flex-basis: 68px; }
+.brand { position: relative; height: 88px; display: flex; align-items: center; padding: 0 17px; border-bottom: 1px solid rgba(53, 72, 90, .18); color: #f7fbfd; white-space: nowrap; }
+.brand-lockup { min-width: 0; display: flex; align-items: center; gap: 11px; overflow: hidden; }
+.brand-mark { position: relative; width: 39px; height: 39px; flex: 0 0 39px; display: grid; place-items: center; border: 1px solid rgba(103, 216, 255, .48); border-radius: 9px; background: radial-gradient(circle at 50% 35%, rgba(103, 216, 255, .18), rgba(11, 24, 36, .65) 68%); box-shadow: inset 0 0 18px rgba(103, 216, 255, .05), 0 0 16px rgba(103, 216, 255, .08); color: #dff7ff; }
+.brand-mark span { font-size: 10px; font-weight: 700; letter-spacing: .12em; transform: translateX(.06em); }
+.brand-mark i { position: absolute; width: 3px; height: 3px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 5px rgba(103, 216, 255, .8); }
+.brand-mark i:nth-of-type(1) { left: 5px; top: 8px; }
+.brand-mark i:nth-of-type(2) { right: 5px; top: 6px; }
+.brand-mark i:nth-of-type(3) { right: 7px; bottom: 6px; }
+.brand-name { max-width: 104px; white-space: normal; color: #b9c7d1; font-size: 10px; line-height: 1.35; letter-spacing: .11em; text-transform: uppercase; }
+.sidebar-toggle { position: absolute; z-index: 2; top: 31px; right: -13px; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 1px solid #314252; border-radius: 50%; background: #0b141e; color: #91a1ad; cursor: pointer; }
+.sidebar-toggle:hover { color: var(--cyan); border-color: rgba(103, 216, 255, .5); }
+.sidebar-toggle svg { width: 14px; height: 14px; stroke-width: 1.6; }
+.sidebar.collapsed .brand { padding: 0 14px; }
+.sidebar.collapsed .brand-name, .sidebar.collapsed .nav-button span { display: none; }
+.sidebar.collapsed .nav-button { padding: 0; justify-content: center; }
 .nav-list { display: flex; flex-direction: column; gap: 7px; padding: 16px 0; }
-.nav-secondary { margin-top: auto; padding-bottom: 26px; }
 .nav-button { position: relative; height: 58px; width: 100%; border: 0; background: transparent; display: flex; align-items: center; gap: 17px; padding: 0 24px; color: #cbd4dc; cursor: pointer; text-align: left; font-size: 14px; }
 .nav-button svg { width: 21px; height: 21px; stroke-width: 1.6; }
 .nav-button:hover { color: #fff; background: rgba(83, 151, 194, .06); }
@@ -65,6 +78,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .zoom-controls svg { width: 17px; stroke-width: 1.6; }
 .local-status { position: absolute; z-index: 2; left: 168px; bottom: 54px; display: flex; gap: 9px; align-items: center; color: #c9d2da; font-size: 12px; }
 .local-status i { width: 7px; height: 7px; background: #4cc292; border-radius: 50%; }
+.local-status.view-sources { left: auto; right: 24px; top: 76px; bottom: auto; padding: 6px 9px; border: 1px solid rgba(65, 91, 113, .45); border-radius: 999px; background: rgba(7, 14, 22, .88); }
 
 .inspector { width: 350px; flex: 0 0 350px; position: relative; z-index: 5; overflow-y: auto; background: linear-gradient(140deg, #0b1420, #080f18 60%); border-left: 1px solid #2a3948; padding: 102px 31px 28px; }
 .inspector-close { position: absolute; top: 26px; right: 21px; color: #aeb8c0; padding: 5px; }
@@ -115,10 +129,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 
 @media (max-width: 1050px) {
   .sidebar { width: 68px; flex-basis: 68px; }
-  .brand { padding: 0; justify-content: center; }
-  .brand span { font-size: 0; }
-  .brand span::after { content: "D/K"; font-size: 13px; letter-spacing: .12em; }
-  .brand svg, .nav-button span { display: none; }
+  .brand { padding: 0 14px; justify-content: center; }
+  .brand-name, .sidebar-toggle, .nav-button span { display: none; }
   .nav-button { padding: 0; justify-content: center; }
   .toolbar { left: 20px; }
   .search-control { width: min(360px, 46%); }
@@ -129,7 +141,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 @media (max-width: 760px) {
   .app-shell { display: block; }
   .sidebar { position: absolute; left: 0; right: 0; bottom: 0; top: auto; width: 100%; height: 60px; display: block; border: 0; border-top: 1px solid var(--line); z-index: 20; }
-  .brand, .nav-secondary { display: none; }
+  .brand { display: none; }
   .nav-list { height: 60px; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); }
   .nav-button { height: 60px; }
   .nav-button span { display: block; font-size: 11px; }

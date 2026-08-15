@@ -1,18 +1,23 @@
-import { CircleHelp, Network, Settings, LibraryBig, Keyboard, ChevronsLeft } from "lucide-react";
+import { LibraryBig, Network, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { useState } from "react";
 
 export type View = "network" | "sources";
 
-export function Sidebar({ view, onChange, onUtility }: { view: View; onChange: (view: View) => void; onUtility: (label: string) => void }) {
-  return <aside className="sidebar" aria-label="Primary navigation">
-    <div className="brand"><span>D / K / N</span><ChevronsLeft size={17} /></div>
+export function Sidebar({ view, onChange }: { view: View; onChange: (view: View) => void }) {
+  const [collapsed, setCollapsed] = useState(false);
+  return <aside className={`sidebar ${collapsed ? "collapsed" : ""}`} aria-label="Primary navigation">
+    <div className="brand">
+      <div className="brand-lockup" aria-label="Digital Knowledge Network">
+        <span className="brand-mark" aria-hidden="true"><span>DKN</span><i /><i /><i /></span>
+        <span className="brand-name">Digital Knowledge Network</span>
+      </div>
+      <button className="sidebar-toggle" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+        {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+      </button>
+    </div>
     <nav className="nav-list">
       <NavButton active={view === "network"} icon={<Network />} label="Network" onClick={() => onChange("network")} />
       <NavButton active={view === "sources"} icon={<LibraryBig />} label="Sources" onClick={() => onChange("sources")} />
-    </nav>
-    <nav className="nav-list nav-secondary">
-      <NavButton icon={<Settings />} label="Settings" onClick={() => onUtility("Settings are not available in this prototype yet.")} />
-      <NavButton icon={<Keyboard />} label="Shortcuts" onClick={() => onUtility("Keyboard navigation is enabled; a shortcut reference is planned.")} />
-      <NavButton icon={<CircleHelp />} label="Help" onClick={() => onUtility("Open README.md for setup and workflow instructions.")} />
     </nav>
   </aside>;
 }

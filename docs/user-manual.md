@@ -45,16 +45,15 @@ Separate messages are separate notes unless they are grouped by an album or pass
 
 ## Synchronize and process
 
-Run these from the project directory whenever new material has been sent:
+Run this from the project directory whenever new material has been sent:
 
 ```powershell
-npm run dev -- telegram sync
-npm run models:start
-npm run dev -- process --provider openai
-npm run dev -- status
+npm run sync
 ```
 
-Run `models:start` in its own terminal and leave it open while processing. The bundled Windows runtime uses Vulkan and offloads all language-model layers to `Vulkan0` by default; its startup output lists and names the selected device. To choose another listed adapter for one session, set `$env:DKN_LLM_DEVICE='Vulkan1'` before starting it. Synchronization is incremental and content-hash deduplicated. Re-running it is safe. The default local model is `LiquidAI/LFM2.5-2.6B`; its endpoint and model name can be changed in `.env`.
+The command starts the GPU model server and production application when needed, synchronizes Telegram, enriches every pending note, rebuilds graph connections, prints final counts, and leaves the app available at `http://127.0.0.1:4174`. Synchronization is incremental and content-hash deduplicated, so rerunning it is safe.
+
+The bundled Windows runtime uses Vulkan and offloads all language-model layers to `Vulkan0` by default. To choose another listed adapter for one session, set `$env:DKN_LLM_DEVICE='Vulkan1'` before running the workflow. The default model is `LiquidAI/LFM2.5-2.6B`; its endpoint and model name can be changed in `.env`.
 
 Both long-running commands report live terminal progress. Telegram sync prints each message's position, extraction state, elapsed-time heartbeat, and result. LLM processing prints the queued total, current note, a heartbeat every five seconds, completion time, failures, and the final graph-edge count. `npm run models:start` is safe to repeat: if the server already owns port 8080, it reports the existing PID and exits without loading a duplicate model.
 

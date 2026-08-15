@@ -18,6 +18,7 @@
     "dev:web": "vite",
     "app": "concurrently -k -n api,web -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
     "start": "node dist/server/server.js",
+    "sync": "powershell -ExecutionPolicy Bypass -File scripts/sync-workflow.ps1",
     "models:start": "powershell -ExecutionPolicy Bypass -File scripts/start-model.ps1",
     "models:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-models.ps1",
     "test": "vitest run --config vitest.config.ts",
