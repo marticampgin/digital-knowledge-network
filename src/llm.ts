@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { jsonrepair } from "jsonrepair";
 
 export interface OpenAICompatibleOptions {
   baseUrl: string;
@@ -54,7 +55,13 @@ export function parseJsonObject(content: string): Record<string, unknown> {
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
   if (start < 0 || end <= start) throw new Error("Model response did not contain a JSON object");
-  const parsed: unknown = JSON.parse(cleaned.slice(start, end + 1));
+  const jsonText = cleaned.slice(start, end + 1);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    parsed = JSON.parse(jsonrepair(jsonText));
+  }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Model response was not a JSON object");
   return parsed as Record<string, unknown>;
 }

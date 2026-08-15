@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { HeuristicEnricher, parseEnrichment } from "../src/enrichment.js";
+import { parseConceptSelection } from "../src/concepts.js";
 import { prepareFile, splitAtomicNotes } from "../src/ingest.js";
 import { processPending } from "../src/pipeline.js";
 import { KnowledgeStore } from "../src/store.js";
@@ -61,6 +62,13 @@ describe("knowledge pipeline", () => {
   it("parses reasoning-model JSON safely", () => {
     expect(parseEnrichment('<think>private reasoning</think>\n```json\n{"coreIdea":"A claim","context":"Supported context","tags":["Customer_Experience","customer experience","Learning","learning"],"confidence":1.4}\n```')).toEqual({
       coreIdea: "A claim", context: "Supported context", tags: ["customer experience", "learning"], confidence: 1,
+    });
+  });
+
+  it("repairs local-model JSON syntax before validating concept IDs", () => {
+    const malformed = '{"existing":[{"conceptId":"known","confidence":0.9,"evidence":"direct evidence"}],"proposed":[{"preferredLabel":"new idea","definition":"A reusable idea","aliases":[],"confidence":0.8,"evidence":"supported"}';
+    expect(parseConceptSelection(malformed, new Set(["known"]))).toMatchObject({
+      existing: [{ conceptId: "known" }], proposed: [{ preferredLabel: "new idea" }],
     });
   });
 

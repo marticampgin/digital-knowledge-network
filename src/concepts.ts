@@ -160,8 +160,11 @@ function clamp(value: number): number {
 
 async function completeWithJsonRetry<T>(client: OpenAICompatibleJsonClient, task: JsonTask, parse: (content: string) => T): Promise<T> {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const request = attempt === 0 ? task : { ...task, user: `${task.user}\n\nRETRY REQUIREMENT\nThe previous response was invalid JSON. Return one concise, complete JSON object within the schema and output limit.` };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const retryRequirement = attempt === 1
+      ? "The previous response was invalid JSON. Return one concise, complete JSON object within the schema and output limit."
+      : "The previous responses were invalid JSON. Return at most 3 existing concepts and 2 proposed concepts. Keep every definition under 25 words and every evidence string under 20 words. Close every array and object.";
+    const request = attempt === 0 ? task : { ...task, user: `${task.user}\n\nRETRY REQUIREMENT\n${retryRequirement}` };
     try {
       return parse((await client.complete(request)).content);
     } catch (error) {
