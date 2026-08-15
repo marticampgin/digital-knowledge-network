@@ -1,4 +1,4 @@
-import { ChevronDown, Search, Upload } from "lucide-react";
+import { ChevronDown, Search, SlidersHorizontal, Upload } from "lucide-react";
 import { useRef } from "react";
 
 export function Toolbar({ search, onSearch, source, relation, onSource, onRelation, onImport, busy }: {
@@ -11,10 +11,11 @@ export function Toolbar({ search, onSearch, source, relation, onSource, onRelati
     <label className="search-control">
       <Search size={19} />
       <input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search your knowledge" aria-label="Search your knowledge" />
-      <kbd>⌘K</kbd>
+      <kbd>/</kbd>
     </label>
     <SelectControl label="Source filter" value={source} onChange={onSource} options={[["all", "All sources"], ["book", "Book & text"], ["image", "Capture"], ["audio", "Audio"]]} />
-    <SelectControl label="Relation filter" value={relation} onChange={onRelation} options={[["all", "All relations"], ["source_sequence", "Source sequence"], ["shared_tag", "Shared tags"]]} />
+    <SelectControl label="Relation filter" value={relation} onChange={onRelation} options={[["all", "All relations"], ["work_sequence", "Work sequence"], ["source_sequence", "Source sequence"], ["explicit_reference", "Replies"], ["semantic_similarity", "Semantic similarity"]]} />
+    <button className="mobile-filter" aria-label="Filter graph"><SlidersHorizontal /></button>
     <button className="import-button" onClick={() => inputRef.current?.click()} disabled={busy}>
       <Upload size={18} />{busy ? "Importing…" : "Import"}
     </button>
@@ -33,4 +34,3 @@ function SelectControl({ label, value, onChange, options }: { label: string; val
     <ChevronDown size={16} aria-hidden />
   </label>;
 }
-

@@ -8,7 +8,7 @@ export function Sidebar({ view, onChange }: { view: View; onChange: (view: View)
   return <aside className={`sidebar ${collapsed ? "collapsed" : ""}`} aria-label="Primary navigation">
     <div className="brand">
       <div className="brand-lockup" aria-label="Digital Knowledge Network">
-        <span className="brand-mark" aria-hidden="true"><span>DKN</span><i /><i /><i /></span>
+        <span className="brand-mark" aria-hidden="true"><span>DKN</span></span>
         <span className="brand-name">Digital Knowledge Network</span>
       </div>
       <button className="sidebar-toggle" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>

@@ -1,5 +1,5 @@
 export type SourceKind = "text" | "markdown" | "image" | "audio" | "telegram";
-export type RelationType = "source_sequence" | "capture_sequence" | "shared_tag" | "explicit_reference" | "semantic_similarity";
+export type RelationType = "source_sequence" | "work_sequence" | "capture_sequence" | "explicit_reference" | "semantic_similarity";
 
 export interface GraphNode {
   id: string;
@@ -8,6 +8,7 @@ export interface GraphNode {
   context: string | null;
   sourceText: string;
   tags: string[];
+  concepts: string[];
   status: string;
   confidence: number | null;
   sourceId: string;

@@ -26,7 +26,7 @@ export default function App() {
   const filtered = useMemo(() => {
     const nodes = graph.nodes.filter((node) => {
       const sourceMatch = source === "all" || source === "book" && ["text", "markdown", "telegram"].includes(node.sourceKind) || node.sourceKind === source;
-      const textMatch = !deferredSearch || `${node.label} ${node.tags.join(" ")} ${node.sourceTitle}`.toLowerCase().includes(deferredSearch);
+      const textMatch = !deferredSearch || `${node.label} ${node.tags.join(" ")} ${node.concepts.join(" ")} ${node.sourceTitle}`.toLowerCase().includes(deferredSearch);
       return sourceMatch && textMatch;
     });
     const ids = new Set(nodes.map((node) => node.id));
@@ -69,6 +69,6 @@ function nodeId(value: string | GraphNode) { return typeof value === "string" ? 
 
 function ListView({ nodes, onSelect }: { view: Exclude<View, "network">; nodes: GraphNode[]; onSelect: (node: GraphNode) => void }) {
   return <div className="list-view"><h1>Sources</h1><p>Every idea remains connected to where it came from.</p>
-    <div className="note-list">{nodes.map((node) => <button key={node.id} onClick={() => onSelect(node)}><span className={`connection-dot kind-${node.sourceKind}`} /><span className="note-summary"><strong>{node.label}</strong><span className="tag-list compact">{node.tags.map((tag) => <span className="tag-chip" key={tag}>{tag}</span>)}</span></span><small>{node.sourceTitle}</small></button>)}</div>
+    <div className="note-list">{nodes.map((node) => <button key={node.id} onClick={() => onSelect(node)}><span className={`connection-gem kind-${node.sourceKind}`} /><span className="note-summary"><strong>{node.label}</strong><span className="concept-list compact">{node.concepts.map((concept) => <span className="concept-chip" key={concept}>{concept}</span>)}</span></span><small>{node.sourceTitle}</small></button>)}</div>
   </div>;
 }
