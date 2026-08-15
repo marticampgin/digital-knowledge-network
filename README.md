@@ -56,6 +56,12 @@ npm run app
 
 Open `http://127.0.0.1:5173`. For a production build, run `npm run build`, then `npm start` and open `http://127.0.0.1:4174`.
 
+For the normal Telegram workflow, one command starts any missing local services, synchronizes captures, enriches pending notes, rebuilds connections, and leaves the application available at `http://127.0.0.1:4174`:
+
+```powershell
+npm run sync
+```
+
 See [Telegram setup](docs/telegram-setup.md) for the exact BotFather, privacy, group discovery, and first-sync procedure.
 
 ## Atomic note format
@@ -80,6 +86,7 @@ If no divider exists, multiple Markdown headings are used as boundaries. Otherwi
 
 - [User manual](docs/user-manual.md)
 - [Technical overview](docs/technical-overview.md)
+- [Knowledge graph strategy](docs/graph-strategy.md)
 - [Architecture](docs/architecture.md)
 - [Product assessment and roadmap](docs/roadmap.md)
 - [Capture time, source context, grouping, and summaries](docs/capture-context-and-summaries.md)
