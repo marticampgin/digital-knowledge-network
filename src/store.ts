@@ -484,9 +484,8 @@ export class KnowledgeStore {
     return rows.map((row) => this.mapNote(row));
   }
 
-  conceptCandidates(note: NoteRecord, limit = 16): ConceptRecord[] {
+  conceptCandidates(note: NoteRecord, limit = 8): ConceptRecord[] {
     const concepts = this.listConcepts();
-    if (concepts.length <= limit) return concepts;
     const tokens = new Set(normalizeConceptLabel(`${note.coreIdea ?? ""} ${note.context ?? ""} ${note.tags.join(" ")}`).split(" ").filter((token) => token.length > 2));
     const model = this.getSetting("embedding.model");
     const noteVector = model ? this.embedding(note.id, model)?.vector : undefined;
@@ -495,8 +494,9 @@ export class KnowledgeStore {
       const lexical = labels.reduce((score, token) => score + (tokens.has(token) ? 1 : 0), 0);
       const conceptVector = model ? this.conceptEmbedding(concept.id, model)?.vector : undefined;
       const semantic = noteVector && conceptVector ? cosineSimilarity(noteVector, conceptVector) : 0;
-      return { concept, score: semantic * 4 + Math.min(lexical, 3) * .2 };
-    }).sort((left, right) => right.score - left.score || left.concept.preferredLabel.localeCompare(right.concept.preferredLabel)).slice(0, limit).map(({ concept }) => concept);
+      return { concept, lexical, semantic, score: semantic * 4 + Math.min(lexical, 3) * .2 };
+    }).filter((candidate) => candidate.semantic >= .5 || candidate.lexical >= 2)
+      .sort((left, right) => right.score - left.score || left.concept.preferredLabel.localeCompare(right.concept.preferredLabel)).slice(0, limit).map(({ concept }) => concept);
   }
 
   requeueConceptSelections(): number {

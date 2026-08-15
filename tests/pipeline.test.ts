@@ -135,6 +135,26 @@ describe("knowledge pipeline", () => {
     }
   });
 
+  it("withholds weak concept candidates so novel ideas can emerge", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dkn-"));
+    dirs.push(dir);
+    const store = new KnowledgeStore(join(dir, "knowledge.sqlite"));
+    try {
+      store.addSource({ kind: "text", title: "Novel", origin: "novel", rawContent: "A distinct idea" }, ["A distinct idea"]);
+      const note = store.pendingNotes()[0]!;
+      store.enrichNote(note.id, { coreIdea: "A distinct idea", context: "", tags: ["novelty"], confidence: 1 }, "test", "test");
+      store.replaceNoteConcepts(note.id, { existing: [], proposed: [{ preferredLabel: "unrelated mechanism", definition: "A different mechanism", aliases: [], confidence: 1, evidence: "seed" }] }, "test", "seed");
+      const concept = store.listConcepts()[0]!;
+      store.storeEmbedding(note.id, "test-model", "note", [1, 0]);
+      store.storeConceptEmbedding(concept.id, "test-model", "concept", [0, 1]);
+      expect(store.conceptCandidates(note)).toEqual([]);
+      store.storeConceptEmbedding(concept.id, "test-model", "concept-2", [0.9, 0.1]);
+      expect(store.conceptCandidates(note).map((candidate) => candidate.id)).toEqual([concept.id]);
+    } finally {
+      store.close();
+    }
+  });
+
   it("parses explicit Telegram source commands without storing placeholder authors", () => {
     expect(parseSourceCommand("/source book | The Everything Store | Author Name")).toEqual({
       kind: "book", title: "The Everything Store", author: undefined, edition: undefined, identifier: undefined,
