@@ -144,7 +144,8 @@ export function parseConceptSelection(content: string, allowedIds: Set<string>):
     }];
   }) : [];
   if (existing.length) return { existing: [existing.sort((left, right) => right.confidence - left.confidence)[0]!], proposed: [] };
-  return { existing: [], proposed: proposed.length ? [proposed.sort((left, right) => right.confidence - left.confidence)[0]!] : [] };
+  if (proposed.length) return { existing: [], proposed: [proposed.sort((left, right) => right.confidence - left.confidence)[0]!] };
+  throw new Error("Concept selector returned no valid primary concept");
 }
 
 export function normalizeConceptLabel(value: string): string {

@@ -484,7 +484,7 @@ export class KnowledgeStore {
     return rows.map((row) => this.mapNote(row));
   }
 
-  conceptCandidates(note: NoteRecord, limit = 5): ConceptRecord[] {
+  conceptCandidates(note: NoteRecord, limit = 1): ConceptRecord[] {
     const concepts = this.listConcepts();
     const tokens = new Set(normalizeConceptLabel(`${note.coreIdea ?? ""} ${note.context ?? ""} ${note.tags.join(" ")}`).split(" ").filter((token) => token.length > 2));
     const model = this.getSetting("embedding.model");
