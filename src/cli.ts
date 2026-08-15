@@ -17,7 +17,7 @@ const usage = `Digital Knowledge Network (v0.1)
 Usage:
   dkn init [--db PATH]
   dkn ingest <file> [--title TITLE] [--db PATH]
-  dkn process [--provider heuristic|openai] [--limit N] [--refresh] [--db PATH]
+  dkn process [--provider heuristic|openai] [--limit N] [--refresh] [--refresh-concepts] [--db PATH]
   dkn telegram discover
   dkn telegram sync [--chat-id ID] [--db PATH]
   dkn status [--db PATH]
@@ -47,6 +47,7 @@ async function main(): Promise<void> {
       out: { type: "string", default: ".dkn/graph.json" },
       "chat-id": { type: "string" },
       refresh: { type: "boolean", default: false },
+      "refresh-concepts": { type: "boolean", default: false },
     },
   });
   const dbPath = resolve(values.db ?? ".dkn/knowledge.sqlite");
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
       if (!Number.isInteger(limit) || limit < 1) throw new Error("--limit must be a positive integer");
       const provider = values.provider ?? "heuristic";
       const requeued = values.refresh ? store.requeueOutdatedNotes(PROMPT_VERSION) : 0;
+      const conceptsRequeued = values["refresh-concepts"] ? store.requeueConceptSelections() : 0;
       const enricher = provider === "heuristic" ? new HeuristicEnricher() : provider === "openai" ? new OpenAICompatibleEnricher({
         baseUrl: process.env.DKN_LLM_BASE_URL ?? "http://127.0.0.1:8080/v1",
         apiKey: process.env.DKN_LLM_API_KEY ?? "local",
@@ -85,7 +87,7 @@ async function main(): Promise<void> {
           ...(provider === "openai" ? { maintenance: new OpenAIConceptMaintenanceEvaluator(llmOptions) } : {}),
         },
       });
-      console.log(JSON.stringify({ requeued, ...result }, null, 2));
+      console.log(JSON.stringify({ requeued, conceptsRequeued, ...result }, null, 2));
     } else if (command === "telegram") {
       const client = new TelegramClient(process.env.TELEGRAM_BOT_TOKEN ?? "");
       const action = positionals[0];

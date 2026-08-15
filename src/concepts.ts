@@ -1,7 +1,7 @@
 import type { ConceptRecord, ConceptSelection, EnrichmentContext, NoteRecord } from "./domain.js";
 import { OpenAICompatibleJsonClient, parseJsonObject, type JsonTask, type OpenAICompatibleOptions } from "./llm.js";
 
-export const CONCEPT_SELECTION_PROMPT_VERSION = "concept-selection-v1";
+export const CONCEPT_SELECTION_PROMPT_VERSION = "concept-selection-v2";
 export const CONCEPT_MAINTENANCE_PROMPT_VERSION = "concept-maintenance-v1";
 
 export interface ConceptSelector {
@@ -61,10 +61,10 @@ export class OpenAIConceptSelector implements ConceptSelector {
       schema: {
         type: "object",
         properties: {
-          existing: { type: "array", maxItems: 8, items: { type: "object", properties: {
+          existing: { type: "array", maxItems: 6, items: { type: "object", properties: {
             conceptId: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 1 }, evidence: { type: "string" },
           }, required: ["conceptId", "confidence", "evidence"], additionalProperties: false } },
-          proposed: { type: "array", maxItems: 4, items: { type: "object", properties: {
+          proposed: { type: "array", maxItems: 3, items: { type: "object", properties: {
             preferredLabel: { type: "string" }, definition: { type: "string" }, aliases: { type: "array", items: { type: "string" }, maxItems: 5 },
             confidence: { type: "number", minimum: 0, maximum: 1 }, evidence: { type: "string" },
           }, required: ["preferredLabel", "definition", "aliases", "confidence", "evidence"], additionalProperties: false } },
@@ -72,7 +72,7 @@ export class OpenAIConceptSelector implements ConceptSelector {
         required: ["existing", "proposed"],
         additionalProperties: false,
       },
-      system: `You are the concept-selection task in a personal knowledge system. Analyze exactly one atomic note. Reuse concepts from the supplied registry whenever their meaning fits; concept IDs must be copied exactly. Propose a new concept only when no existing concept genuinely captures the idea. Concepts should be reusable intellectual ideas, mechanisms, practices, or phenomena—not people, book titles, generic words, sentence fragments, or near-duplicates. Prefer 2-6 precise concepts. A new preferred label is lowercase natural language without underscores. Definitions must distinguish the concept from nearby concepts. Evidence must quote or closely point to the supplied note. Do not merge, rename, or evaluate the registry; that belongs to a separate maintenance task. Return JSON only.`,
+      system: `You are the concept-selection task in a personal knowledge system. Analyze exactly one atomic note. The registry contains only retrieved candidates, not mandatory choices. Reuse a candidate only when its definition directly matches a central idea in this note; never select it merely because it concerns the same book, company, person, or broad topic. Concept IDs must be copied exactly. Propose a new concept only when no candidate genuinely captures an important idea. Concepts should be reusable intellectual ideas, mechanisms, practices, or phenomena—not people, book titles, generic words, sentence fragments, or near-duplicates. Prefer 2-5 precise concepts. A new preferred label is lowercase natural language without underscores. Definitions must distinguish the concept from nearby concepts. Each evidence string must identify the note text supporting that specific assignment. Do not merge, rename, or evaluate the registry; that belongs to a separate maintenance task. Return JSON only.`,
       user: `SOURCE\n${work}\n\nATOMIC NOTE\nCore idea: ${note.coreIdea ?? ""}\nContext: ${note.context ?? ""}\nCanonical text: ${note.rawText}\n\nCURRENT CONCEPT REGISTRY\n${registry}`,
       maxTokens: 2048,
     };

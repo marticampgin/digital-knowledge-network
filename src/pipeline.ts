@@ -60,16 +60,8 @@ export async function processPending(store: KnowledgeStore, enricher: Enricher, 
   let embeddingsCreated = 0;
   let mergeProposals = 0;
   if (options.knowledge) {
-    const conceptNotes = store.notesNeedingConcepts(options.knowledge.selector.promptVersion, limit);
-    for (const [index, note] of conceptNotes.entries()) {
-      const started = Date.now();
-      options.onProgress?.({ phase: "concept-start", current: index + 1, total: conceptNotes.length, noteId: note.id, elapsedMs: 0 });
-      const selection = await options.knowledge.selector.select(note, store.enrichmentContext(note.id), store.conceptCandidates(note));
-      conceptsAssigned += store.replaceNoteConcepts(note.id, selection, options.knowledge.selector.name, options.knowledge.selector.promptVersion);
-      options.onProgress?.({ phase: "concept-complete", current: index + 1, total: conceptNotes.length, noteId: note.id, elapsedMs: Date.now() - started });
-    }
     const embeddingJobs = store.enrichedNotes().flatMap((note) => {
-      const text = embeddingText(note, store.conceptsForNote(note.id).map((concept) => concept.preferredLabel));
+      const text = embeddingText(note);
       const inputHash = embeddingInputHash(text, options.knowledge!.embedder.model);
       return store.embedding(note.id, options.knowledge!.embedder.model)?.inputHash === inputHash ? [] : [{ note, text, inputHash }];
     });
@@ -95,6 +87,27 @@ export async function processPending(store: KnowledgeStore, enricher: Enricher, 
     if (conceptEmbeddingJobs.length) {
       const vectors = await options.knowledge.embedder.embed(conceptEmbeddingJobs.map((job) => job.text));
       for (const [index, job] of conceptEmbeddingJobs.entries()) {
+        const vector = vectors[index];
+        if (!vector) throw new Error(`Embedding model returned no vector for concept ${job.concept.id}`);
+        store.storeConceptEmbedding(job.concept.id, options.knowledge.embedder.model, job.inputHash, vector);
+      }
+    }
+    const conceptNotes = store.notesNeedingConcepts(options.knowledge.selector.promptVersion, limit);
+    for (const [index, note] of conceptNotes.entries()) {
+      const started = Date.now();
+      options.onProgress?.({ phase: "concept-start", current: index + 1, total: conceptNotes.length, noteId: note.id, elapsedMs: 0 });
+      const selection = await options.knowledge.selector.select(note, store.enrichmentContext(note.id), store.conceptCandidates(note));
+      conceptsAssigned += store.replaceNoteConcepts(note.id, selection, options.knowledge.selector.name, options.knowledge.selector.promptVersion);
+      options.onProgress?.({ phase: "concept-complete", current: index + 1, total: conceptNotes.length, noteId: note.id, elapsedMs: Date.now() - started });
+    }
+    const newConceptEmbeddingJobs = store.listConcepts().flatMap((concept) => {
+      const text = `Concept: ${concept.preferredLabel}\nAliases: ${concept.aliases.join(", ") || "none"}\nDefinition: ${concept.definition}`;
+      const inputHash = embeddingInputHash(text, options.knowledge!.embedder.model);
+      return store.conceptEmbedding(concept.id, options.knowledge!.embedder.model)?.inputHash === inputHash ? [] : [{ concept, text, inputHash }];
+    });
+    if (newConceptEmbeddingJobs.length) {
+      const vectors = await options.knowledge.embedder.embed(newConceptEmbeddingJobs.map((job) => job.text));
+      for (const [index, job] of newConceptEmbeddingJobs.entries()) {
         const vector = vectors[index];
         if (!vector) throw new Error(`Embedding model returned no vector for concept ${job.concept.id}`);
         store.storeConceptEmbedding(job.concept.id, options.knowledge.embedder.model, job.inputHash, vector);

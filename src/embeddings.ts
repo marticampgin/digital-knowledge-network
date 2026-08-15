@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { NoteRecord } from "./domain.js";
 
 export const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
-export const EMBEDDING_VERSION = "note-representation-v1";
+export const EMBEDDING_VERSION = "note-representation-v2";
 
 export interface EmbeddingProgress {
   status: string;
@@ -52,11 +52,10 @@ export class MiniLmEmbedder implements Embedder {
   }
 }
 
-export function embeddingText(note: NoteRecord, concepts: string[]): string {
+export function embeddingText(note: NoteRecord): string {
   return [
     `Core idea: ${note.coreIdea ?? note.rawText.slice(0, 1200)}`,
     note.context ? `Context: ${note.context.slice(0, 1200)}` : "",
-    concepts.length ? `Concepts: ${concepts.join(", ")}` : "",
   ].filter(Boolean).join("\n");
 }
 
