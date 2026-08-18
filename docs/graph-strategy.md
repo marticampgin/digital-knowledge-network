@@ -2,7 +2,7 @@
 
 ## Assessment of the current graph
 
-The original MVP used source/capture sequence plus Jaccard overlap of LLM-generated tags. The current implementation replaces that topology with the first provenance-first hybrid layer described below: work/source/reply structure, a controlled concept registry, and mutual-nearest-neighbor embeddings.
+The original MVP used source/capture sequence plus Jaccard overlap of LLM-generated tags. The current implementation separates durable provenance from visible topology: work/source/reply structure remains stored and auditable, while a hierarchical semantic projection determines graph placement. A controlled concept registry supports interpretation, but free-form tags never create edges.
 
 This is explainable and inexpensive, but it has structural weaknesses:
 
@@ -21,7 +21,7 @@ Use one durable evidence layer and several derived, independently rebuildable vi
 
 ### 1. Provenance backbone
 
-Always retain deterministic relationships: note-to-capture, capture-to-work, album/passage membership, explicit replies, and ordered adjacency within a work/topic. These edges are facts about origin, not semantic guesses, and must remain visible even when every model-derived index is rebuilt.
+Always retain deterministic relationships: note-to-capture, capture-to-work, album/passage membership, explicit replies, and ordered adjacency within a work/topic. These edges are facts about origin, not semantic guesses, and survive every model-derived rebuild. They remain available in source inspection and exports; they are intentionally excluded from force layout because chronology is not conceptual proximity.
 
 ### 2. Controlled concept layer
 
@@ -47,13 +47,13 @@ Run community detection over the stable semantic/entity graph, then maintain sum
 
 ## Edge policy for the visual network
 
-The visible graph should combine signals without collapsing their meanings:
+The visible graph uses semantic meaning consistently:
 
-- solid edges: explicit/provenance relationships;
-- soft edges: calibrated semantic similarity;
-- directional edges: typed claims or references;
-- node color or hull: derived community;
-- concept chips: controlled facets, not automatic edges by themselves.
+- overview polygons: works connected by strongest distinct theme matches;
+- violet cells: capacity-constrained semantic themes within a work;
+- uniform cyan nodes: atomic notes, regardless of capture format;
+- dashed edges: calibrated semantic nearest neighbors;
+- inspector/source view: exact evidence, canonical source, concepts, tags, and provenance.
 
 Do not use a single global degree cap. Apply per-edge-type limits, preserve all explicit edges, use mutual top-k for semantic edges, and ensure every component's separation is explainable. Generic concepts should contribute less than specific ones, analogous to inverse document frequency.
 
@@ -68,4 +68,4 @@ Create a representative gold set of related and unrelated note pairs, including 
 - generic-concept dominance and degree distribution;
 - human judgments of explanation quality and unexpected discovery.
 
-The implemented foundation is intentionally not a full GraphRAG clone: it now has work-sequence edges, explicit replies, a controlled concept registry, local MiniLM embeddings, and a separate semantic edge type. The next quality milestone is a small labeled neighbor set that calibrates within-work and cross-work thresholds. Entities, claims, communities, and summaries should follow only after that evaluation.
+The implemented foundation is intentionally not a full GraphRAG clone. It has durable work/passage/reply provenance, a controlled concept registry, local MiniLM embeddings, mutual capped note neighbors, capacity-aware per-work themes, and size-normalized work relationships. Work summaries are readable knowledge artifacts but never relationship vectors. All clustering and edge parameters are persisted, clamped, and regenerable in the UI without invoking an LLM. The next quality milestone is a small labeled neighbor set that calibrates the defaults; entities, claims, and richer relation types should follow only after that evaluation.

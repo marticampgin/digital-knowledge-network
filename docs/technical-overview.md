@@ -48,19 +48,21 @@ The model, prompt version, confidence, and evidence are stored with derived reco
 
 `Xenova/all-MiniLM-L6-v2` runs locally through Transformers.js and produces normalized 384-dimensional embeddings. The model is small, English-focused, and intended for sentence/paragraph semantic similarity. Model files are cached under `.dkn/models/transformers`; note and concept vectors are keyed by model, representation version, and input hash so unchanged material is not recomputed.
 
+The presentation graph is a deterministic hierarchy derived from those vectors. Notes are clustered per work with capacity-aware semantic assignment, producing stable theme IDs and preventing one broad cluster from swallowing the work. Work-to-work similarity is the mean of a capped set of strongest **distinct** theme matches; it never embeds or compares generated prose summaries. This normalizes for source size and keeps readable summaries separate from topology.
+
 Graph edges are rebuilt from two explicitly separated layers:
 
 - `source_sequence` connects adjacent atomic notes from the same captured source;
 - `work_sequence` connects adjacent atomic notes within the same registered book, article, audio work, or other source container;
 - `capture_sequence` preserves order when a capture group contains separate notes;
 - `explicit_reference` preserves Telegram replies;
-- `semantic_similarity` retains calibrated mutual top-four embedding neighbors, using separate within-work and cross-work thresholds.
+- `semantic_similarity` retains calibrated, capped mutual embedding neighbors within a work. Cross-work atomic-note edges are disabled in the default hierarchy; cross-work discovery occurs through distinct theme matches instead.
 
 Free-form tags remain visible browsing facets but no longer determine topology. Provenance edges are factual; semantic edges are model-derived candidates and store their model, score, and selection rule in human-readable evidence. Concept definitions are embedded separately to retrieve plausible alias/merge candidates for the maintenance task.
 
 ## Application boundary
 
-Fastify exposes status, graph retrieval, file import, enrichment processing, and a legacy note-review endpoint. The React client consumes the graph API and presents Network and Sources views. Selecting a node opens an inspector containing canonical evidence, generated fields, provenance, and connected notes. Production builds place the client under `dist/web` and the server under `dist/server`.
+Fastify exposes status, graph retrieval, graph-setting updates, file import, and enrichment processing. `GET /api/graph` includes work cells, theme cells, note-theme assignments, and work relationships. `PUT /api/graph/settings` clamps and persists graph parameters, rebuilds semantic edges, and returns the regenerated hierarchy without model inference. The React client presents Network and Sources views with overview/drill-down inspectors. Production builds place the client under `dist/web` and the server under `dist/server`.
 
 CLI commands cover database initialization, file ingestion, Telegram discovery/sync, enrichment, status, and stable JSON export. This CLI/API boundary is also the foundation for a future agent-callable synchronization tool.
 
@@ -70,4 +72,4 @@ The intended default processing path is local. `.env`, the SQLite database, mode
 
 Work summaries use a map-reduce hierarchy rather than placing an unbounded book into one context window. Leaf prompts receive bounded sets of atomic notes; intermediate digests are recursively reduced only when needed; the synthesis produces an overview, themes, key ideas, tensions, takeaways, and open questions. Each revision stores its ordered note IDs, deterministic input hash, citation map, strategy, model, and prompt version. It is invalidated by changed notes and never claims coverage beyond captured material.
 
-Current limitations are deliberate: English-only OCR/transcription, no reliable original screenshot timestamp, embedding thresholds still need a user-labeled evaluation set, merge proposals are stored but not automatically applied, and source reassignment, cross-work summaries, in-app summary reading, and external QA are not yet implemented. SQLite remains appropriate until graph scale or traversal requirements justify a dedicated graph store.
+Current limitations are deliberate: English-only OCR/transcription, no reliable original screenshot timestamp, embedding thresholds still need a user-labeled evaluation set, merge proposals are stored but not automatically applied, and source reassignment and external QA are not yet implemented. Theme cells are navigational derivations rather than permanent ontology records and can change when notes or settings change. SQLite remains appropriate until graph scale or traversal requirements justify a dedicated graph store.

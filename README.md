@@ -18,10 +18,10 @@ The project deliberately separates **capture**, **extraction**, **grouping**, **
 - Enrich notes either with a deterministic offline baseline or any OpenAI-compatible local model server.
 - Store sources, notes, provenance, model/prompt metadata, and typed graph edges in local SQLite.
 - Generate versioned, note-cited summaries of all captured material from one work with hierarchical batching.
-- Explore a responsive low-poly graph with pan, zoom, fit, search, typed relationship filters, controlled concepts, visible tags, import, and source inspection.
+- Explore a responsive low-poly hierarchy: work-level knowledge cells, emergent themes, and semantically arranged atomic notes with inspectable canonical source text.
 - Export a stable JSON graph for another client or agent tool.
 
-The graph combines provenance edges with local MiniLM semantic neighbors. Threshold evaluation, applying concept-merge proposals, screenshot grouping controls, cross-work summaries, and optional remote QA remain future work.
+The visible topology is semantic: local MiniLM neighbors arrange notes inside each work, while size-normalized theme matches connect works. Provenance is retained in SQLite and the inspector but does not distort layout. Graph caps and thresholds can be tuned in the interface without rerunning OCR or the LLM.
 
 ## Quick start
 

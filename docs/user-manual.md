@@ -65,13 +65,14 @@ Start the production application with `npm start` and open `http://127.0.0.1:417
 
 `npm start` only reads the existing local database and serves the current graph. It does not contact Telegram, start the language model, or reprocess notes. If no production build exists after a fresh clone, run `npm run build` once first.
 
-- **Network:** pan, zoom, fit, search, and filter the low-poly knowledge graph. Select a polygon node to inspect its idea, primary controlled concept, descriptive tags, source, and connections. Every atomic note has exactly one primary concept. Solid edges are provenance; dashed violet edges are semantic similarity.
+- **Network:** begin in the knowledge landscape, where each polygon is a book, article, or other work. Select a work to read its evolving summary and emergent themes, then choose **Explore atomic notes**. Inside a work, cyan nodes are atomic notes, violet cells are derived themes, and dashed edges represent semantic similarity. Search narrows the current work without changing stored data.
+- **Graph settings:** use the sliders icon to tune maximum connections, similarity floors, theme count and size limits, maximum theme share, and cross-work evidence/neighbor caps. **Apply & regenerate** rebuilds deterministic derived structure from stored embeddings; it never reruns capture, OCR, transcription, enrichment, or summarization. Use **Defaults** to restore the recommended balanced profile.
 - **Sources:** browse notes as a list. Selecting one stays in Sources and opens its evidence panel.
 - **Canonical source text:** this is the stored original text, OCR result, or transcript. It is not rewritten by the LLM. Use **Copy source text** to copy it.
 - **LLM-generated fields:** Core Idea, Context, and descriptive Tags are interpretations and are visibly labeled. They never replace canonical evidence. Concepts are selected by a separate task from a controlled registry.
 - **Import:** the top-bar Import action accepts text/Markdown, common image formats, and common English audio formats. Direct UI imports currently receive deterministic heuristic enrichment. To use local-LLM enrichment for a file, ingest it with `npm run dev -- ingest <path>`, then run the OpenAI-compatible processing command.
 
-Graph connections distinguish what is known from what is inferred. Same-source, same-work order, capture order, and replies are provenance relationships. Dashed semantic links are mutual nearest neighbors produced by the local embedding model; their percentages are similarity scores, not proof that two claims are equivalent. Tags never create edges.
+Graph connections distinguish what is stored from what is inferred. Same-source, passage order, Telegram replies, and work membership remain durable provenance records, but they do not pull atomic notes together visually. Inside a work, placement follows capped semantic nearest neighbors plus derived theme membership. Between works, links use a capped set of the strongest distinct theme pairs so a large book cannot win merely by having more notes. Similarity is evidence for navigation, not proof that two claims are equivalent. Tags never create edges.
 
 ## Summarize a finished work
 
