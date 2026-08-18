@@ -1,10 +1,9 @@
-import { ChevronDown, Search, SlidersHorizontal, Upload } from "lucide-react";
+import { ChevronDown, Search, Settings2, Upload } from "lucide-react";
 import { useRef } from "react";
 
-export function Toolbar({ search, onSearch, source, relation, onSource, onRelation, onImport, busy }: {
-  search: string; onSearch: (value: string) => void; source: string; relation: string;
-  onSource: (value: string) => void; onRelation: (value: string) => void;
-  onImport: (file: File) => void; busy: boolean;
+export function Toolbar({ search, onSearch, scope, works, onScope, onSettings, onImport, busy }: {
+  search: string; onSearch: (value: string) => void; scope: string; works: { id: string; title: string }[];
+  onScope: (value: string) => void; onSettings: () => void; onImport: (file: File) => void; busy: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return <header className="toolbar">
@@ -13,9 +12,8 @@ export function Toolbar({ search, onSearch, source, relation, onSource, onRelati
       <input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search your knowledge" aria-label="Search your knowledge" />
       <kbd>/</kbd>
     </label>
-    <SelectControl label="Source filter" value={source} onChange={onSource} options={[["all", "All sources"], ["book", "Book & text"], ["image", "Capture"], ["audio", "Audio"]]} />
-    <SelectControl label="Relation filter" value={relation} onChange={onRelation} options={[["all", "All relations"], ["work_sequence", "Work sequence"], ["source_sequence", "Source sequence"], ["explicit_reference", "Replies"], ["semantic_similarity", "Semantic similarity"]]} />
-    <button className="mobile-filter" aria-label="Filter graph"><SlidersHorizontal /></button>
+    <SelectControl label="Knowledge scope" value={scope} onChange={onScope} options={[["overview", "Knowledge overview"], ...works.map((work) => [work.id, work.title])]} />
+    <button className="mobile-filter settings-button" onClick={onSettings} aria-label="Graph settings"><Settings2 /></button>
     <button className="import-button" onClick={() => inputRef.current?.click()} disabled={busy}>
       <Upload size={18} />{busy ? "Importing…" : "Import"}
     </button>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import type { GraphData } from "./types";
 
-const EMPTY_GRAPH: GraphData = { nodes: [], links: [] };
+const EMPTY_GRAPH: GraphData = { nodes: [], links: [], hierarchy: { version: "", settings: { noteNeighborCap: 4, noteSimilarityThreshold: .55, maxThemesPerWork: 8, minNotesPerTheme: 2, maxThemeShare: .3, themeMatchCap: 3, workNeighborCap: 4, workSimilarityThreshold: .55 }, works: [], themes: [], workLinks: [], noteThemes: {} } };
 
 export function useKnowledgeGraph() {
   const [graph, setGraph] = useState<GraphData>(EMPTY_GRAPH);
@@ -25,6 +25,12 @@ export function useKnowledgeGraph() {
     }
   }, []);
 
+  const updateSettings = useCallback(async (settings: GraphData["hierarchy"]["settings"]) => {
+    const response = await fetch("/api/graph/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(settings) });
+    if (!response.ok) throw new Error(`Could not regenerate graph: ${response.status}`);
+    await refresh();
+  }, [refresh]);
+
   useEffect(() => {
     void refresh();
     const interval = window.setInterval(() => {
@@ -37,5 +43,5 @@ export function useKnowledgeGraph() {
       window.removeEventListener("focus", refreshOnFocus);
     };
   }, [refresh]);
-  return { graph, error, isPending, refresh };
+  return { graph, error, isPending, refresh, updateSettings };
 }
