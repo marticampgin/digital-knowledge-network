@@ -2,6 +2,7 @@ import type { Enricher } from "./enrichment.js";
 import { PROMPT_VERSION } from "./enrichment.js";
 import type { ConceptMaintenanceEvaluator, ConceptSelector } from "./concepts.js";
 import { embeddingInputHash, embeddingText, type Embedder } from "./embeddings.js";
+import { readGraphSettings } from "./hierarchy.js";
 import { KnowledgeStore } from "./store.js";
 
 export interface ProcessResult {
@@ -126,7 +127,13 @@ export async function processPending(store: KnowledgeStore, enricher: Enricher, 
       }
     }
   }
-  const edges = store.replaceDerivedEdges(options.knowledge ? { embeddingModel: options.knowledge.embedder.model } : {});
+  const graphSettings = readGraphSettings(store);
+  const edges = store.replaceDerivedEdges(options.knowledge ? {
+    embeddingModel: options.knowledge.embedder.model,
+    semanticTopK: graphSettings.noteNeighborCap,
+    withinWorkThreshold: graphSettings.noteSimilarityThreshold,
+    crossWorkThreshold: 1.01,
+  } : {});
   options.onProgress?.({ phase: "complete", total: notes.length, processed, failed, edges, elapsedMs: Date.now() - runStarted });
   return { processed, failed, edges, errors, conceptsAssigned, embeddingsCreated, mergeProposals };
 }

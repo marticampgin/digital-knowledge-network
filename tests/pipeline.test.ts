@@ -9,6 +9,7 @@ import { processPending } from "../src/pipeline.js";
 import { KnowledgeStore } from "../src/store.js";
 import { summarizeWork } from "../src/summaries.js";
 import type { JsonTask } from "../src/llm.js";
+import { buildHierarchy, readGraphSettings, saveGraphSettings } from "../src/hierarchy.js";
 import { parsePassageCommand, parseSourceCommand } from "../src/telegram.js";
 
 const dirs: string[] = [];
@@ -245,6 +246,50 @@ describe("knowledge pipeline", () => {
       expect(second.summary.id).toBe(first.summary.id);
       expect(calls).toBe(callsAfterGeneration);
       expect(store.exportGraph().workSummaries).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("builds size-normalized work relationships from distinct semantic themes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dkn-"));
+    dirs.push(dir);
+    const store = new KnowledgeStore(join(dir, "knowledge.sqlite"));
+    try {
+      const large = store.upsertWork({ kind: "book", title: "Large Work" }).work;
+      const small = store.upsertWork({ kind: "book", title: "Small Work" }).work;
+      const add = (workId: string, origin: string, coreIdea: string, vector: number[]) => {
+        store.addSource({ kind: "text", title: origin, origin, rawContent: coreIdea, workId }, [coreIdea]);
+        const note = store.pendingNotes().at(-1)!;
+        store.enrichNote(note.id, { coreIdea, context: "", tags: ["theme"], confidence: 1 }, "test", "test");
+        store.storeEmbedding(note.id, "hierarchy-test", origin, vector);
+      };
+      for (let index = 0; index < 3; index += 1) add(large.id, `large-a-${index}`, `Large alpha ${index}`, [1, 0]);
+      for (let index = 0; index < 3; index += 1) add(large.id, `large-b-${index}`, `Large beta ${index}`, [0, 1]);
+      add(small.id, "small-a", "Small alpha", [0.99, 0.01]);
+      add(small.id, "small-b", "Small beta", [0.01, 0.99]);
+      const settings = saveGraphSettings(store, { maxThemesPerWork: 2, minNotesPerTheme: 1, themeMatchCap: 2, workSimilarityThreshold: 0.8 });
+      const hierarchy = buildHierarchy(store, settings);
+      expect(hierarchy.works.map((work) => ({ title: work.title, notes: work.noteCount, themes: work.themeCount }))).toEqual([
+        { title: "Large Work", notes: 6, themes: 2 }, { title: "Small Work", notes: 2, themes: 2 },
+      ]);
+      expect(hierarchy.workLinks).toHaveLength(1);
+      expect([hierarchy.workLinks[0]!.source, hierarchy.workLinks[0]!.target].sort()).toEqual([large.id, small.id].sort());
+      expect(hierarchy.workLinks[0]!.evidence).toHaveLength(2);
+      expect(hierarchy.workLinks[0]!.weight).toBeGreaterThan(0.99);
+      expect(Object.keys(hierarchy.noteThemes)).toHaveLength(8);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("clamps and persists adjustable hierarchy settings", () => {
+    const store = new KnowledgeStore(":memory:");
+    try {
+      expect(saveGraphSettings(store, { noteNeighborCap: 100, noteSimilarityThreshold: 0, maxThemesPerWork: 0, maxThemeShare: 1 })).toMatchObject({
+        noteNeighborCap: 12, noteSimilarityThreshold: 0.2, maxThemesPerWork: 1, maxThemeShare: 0.8,
+      });
+      expect(readGraphSettings(store)).toMatchObject({ noteNeighborCap: 12, noteSimilarityThreshold: 0.2, maxThemesPerWork: 1, maxThemeShare: 0.8 });
     } finally {
       store.close();
     }

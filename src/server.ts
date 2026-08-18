@@ -10,6 +10,7 @@ import { MiniLmEmbedder } from "./embeddings.js";
 import { extractFile } from "./extractors.js";
 import { processPending } from "./pipeline.js";
 import { KnowledgeStore } from "./store.js";
+import { buildHierarchy, readGraphSettings, saveGraphSettings, type GraphSettings } from "./hierarchy.js";
 
 const envPath = resolve(".env");
 if (existsSync(envPath)) loadEnvFile(envPath);
@@ -25,6 +26,8 @@ app.get("/api/status", async () => ({ ...store.stats(), local: true }));
 
 app.get("/api/graph", async () => {
   const graph = store.exportGraph();
+  const hierarchy = buildHierarchy(store);
+  const themeLabels = new Map(hierarchy.themes.map((theme) => [theme.id, theme.label]));
   const sources = new Map(graph.sources.map((source) => [source.id, source]));
   const works = new Map(graph.works.map((work) => [work.id, work]));
   const concepts = new Map(graph.concepts.map((concept) => [concept.id, concept]));
@@ -48,13 +51,30 @@ app.get("/api/graph", async () => {
         status: note.status,
         confidence: note.confidence,
         sourceId: note.sourceId,
+        workId: work?.id ?? null,
+        workTitle: work?.title ?? null,
+        themeId: hierarchy.noteThemes[note.id] ?? null,
+        themeLabel: themeLabels.get(hierarchy.noteThemes[note.id] ?? "") ?? null,
         sourceTitle: work?.title ?? source?.title ?? "Unknown source",
         sourceKind: source?.kind ?? "text",
         origin: source?.origin ?? "",
       };
     }),
     links: graph.edges.map((edge) => ({ source: edge.fromNoteId, target: edge.toNoteId, type: edge.type, weight: edge.weight, evidence: edge.evidence })),
+    hierarchy,
   };
+});
+
+app.get("/api/graph/settings", async () => readGraphSettings(store));
+
+app.put<{ Body: Partial<GraphSettings> }>("/api/graph/settings", async (request) => {
+  const settings = saveGraphSettings(store, request.body ?? {});
+  store.replaceDerivedEdges({
+    semanticTopK: settings.noteNeighborCap,
+    withinWorkThreshold: settings.noteSimilarityThreshold,
+    crossWorkThreshold: 1.01,
+  });
+  return buildHierarchy(store, settings);
 });
 
 app.post("/api/import", async (request, reply) => {
