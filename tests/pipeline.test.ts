@@ -7,6 +7,8 @@ import { parseConceptSelection } from "../src/concepts.js";
 import { prepareFile, splitAtomicNotes } from "../src/ingest.js";
 import { processPending } from "../src/pipeline.js";
 import { KnowledgeStore } from "../src/store.js";
+import { summarizeWork } from "../src/summaries.js";
+import type { JsonTask } from "../src/llm.js";
 import { parsePassageCommand, parseSourceCommand } from "../src/telegram.js";
 
 const dirs: string[] = [];
@@ -97,14 +99,19 @@ describe("knowledge pipeline", () => {
       const registered = store.upsertWork({ kind: "book", title: "The Everything Store" });
       const completedMetadata = store.upsertWork({ kind: "book", title: "The Everything Store", author: "Brad Stone" });
       expect(completedMetadata).toMatchObject({ created: false, work: { id: registered.work.id, author: "Brad Stone" } });
-      store.bindTelegramTopic(-100123, 3, registered.work.id);
+      store.addSource({
+        kind: "telegram", title: "Earlier capture", origin: "telegram://-100123/5", rawContent: "Already uploaded",
+        metadata: { telegramChatId: -100123, telegramMessageThreadId: 3, telegramMessageId: 5 },
+      }, ["Already uploaded"]);
+      expect(store.bindTelegramTopic(-100123, 3, registered.work.id)).toBe(1);
       const assigned = store.workForTelegramTopic(-100123, 3);
       expect(assigned).toMatchObject({ id: registered.work.id, kind: "book", title: "The Everything Store", author: "Brad Stone" });
       const added = store.addSource({
         kind: "telegram", title: "Capture", origin: "telegram://-100123/6", rawContent: "A passage", workId: assigned?.id,
       }, ["A passage"]);
       expect(added.source.workId).toBe(registered.work.id);
-      expect(store.exportGraph()).toMatchObject({ schemaVersion: 3, works: [{ title: "The Everything Store" }] });
+      expect(store.exportGraph().sources.find((source) => source.origin.endsWith("/5"))?.workId).toBe(registered.work.id);
+      expect(store.exportGraph()).toMatchObject({ schemaVersion: 4, works: [{ title: "The Everything Store" }] });
     } finally {
       store.close();
     }
@@ -199,6 +206,45 @@ describe("knowledge pipeline", () => {
       expect(parsePassageCommand("/passage continue")).toBe("continue");
       expect(parsePassageCommand("/passage end")).toBe("end");
       expect(parsePassageCommand("/continue")).toBeUndefined();
+    } finally {
+      store.close();
+    }
+  });
+
+  it("creates and caches a hierarchical, note-cited work summary", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dkn-"));
+    dirs.push(dir);
+    const store = new KnowledgeStore(join(dir, "knowledge.sqlite"));
+    try {
+      const work = store.upsertWork({ kind: "book", title: "A Long Book", author: "A Writer" }).work;
+      for (let index = 0; index < 3; index += 1) {
+        store.addSource({ kind: "text", title: `Note ${index + 1}`, origin: `note-${index + 1}`, rawContent: `Evidence ${index + 1}`, workId: work.id }, [`Evidence ${index + 1}`]);
+      }
+      for (const [index, note] of store.pendingNotes().entries()) {
+        store.enrichNote(note.id, { coreIdea: `Idea ${index + 1} ${"detail ".repeat(340)}`, context: "Supporting context", tags: ["systems"], confidence: 1 }, "test", "test");
+      }
+      let calls = 0;
+      const client = {
+        options: { baseUrl: "local", apiKey: "local", model: "summary-test" },
+        async complete(task: JsonTask) {
+          calls += 1;
+          const refs = [...new Set([...task.user.matchAll(/\bN\d{3,}\b/g)].map((match) => match[0]))];
+          const body = task.task === "work-summary-synthesis"
+            ? { summary: `Overall account ${refs.map((ref) => `[${ref}]`).join(" ")}`, themes: ["systems"], keyIdeas: ["Ideas interact"], tensions: ["A tension"], takeaways: ["A takeaway"], openQuestions: ["A question?"], coveredNoteRefs: refs }
+            : { summary: `Batch account ${refs.map((ref) => `[${ref}]`).join(" ")}`, themes: ["systems"], keyIdeas: ["A key idea"], tensions: [], openQuestions: [], coveredNoteRefs: refs };
+          return { content: JSON.stringify(body), inputHash: "test" };
+        },
+      };
+      const first = await summarizeWork(store, work, client, { chunkCharacters: 4_000 });
+      expect(first.cached).toBe(false);
+      expect(first.summary).toMatchObject({ workId: work.id, noteCount: 3, model: "summary-test", citationMap: { N001: expect.any(String), N002: expect.any(String), N003: expect.any(String) } });
+      expect(calls).toBeGreaterThanOrEqual(3);
+      const callsAfterGeneration = calls;
+      const second = await summarizeWork(store, work, client, { chunkCharacters: 4_000 });
+      expect(second.cached).toBe(true);
+      expect(second.summary.id).toBe(first.summary.id);
+      expect(calls).toBe(callsAfterGeneration);
+      expect(store.exportGraph().workSummaries).toHaveLength(1);
     } finally {
       store.close();
     }

@@ -135,7 +135,7 @@ The Telegram interface should remain button-led. Commands provide fast and acces
 - `/assign` - when sent as a reply, assign that message/album to a source;
 - `/unknown` - deliberately leave the selected material without a source;
 - `/status` - show pending, processed, uncertain, and failed captures;
-- `/summary` - generate or open the captured-notes summary for the current source topic;
+- `/summary` - planned Telegram shortcut; today use `npm run summarize -- "Exact Work Title"` locally;
 - `/help` - show examples and buttons.
 
 There should be no requirement to type special metadata into every caption. For advanced use, a compact caption directive may override defaults:

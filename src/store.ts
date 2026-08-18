@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { ConceptMergeProposalRecord, ConceptRecord, ConceptSelection, EdgeRecord, EdgeType, Enrichment, EnrichmentContext, GraphExport, NoteConceptRecord, NoteRecord, SourceInput, SourceRecord, WorkInput, WorkRecord } from "./domain.js";
+import type { ConceptMergeProposalRecord, ConceptRecord, ConceptSelection, EdgeRecord, EdgeType, Enrichment, EnrichmentContext, GraphExport, NoteConceptRecord, NoteRecord, SourceInput, SourceRecord, WorkInput, WorkRecord, WorkSummaryRecord } from "./domain.js";
 import { normalizeConceptLabel } from "./concepts.js";
 import { cosineSimilarity, EMBEDDING_VERSION } from "./embeddings.js";
 import { normalizeTags } from "./tags.js";
@@ -154,6 +154,24 @@ export class KnowledgeStore {
         created_at TEXT NOT NULL,
         UNIQUE(left_concept_id, right_concept_id, prompt_version)
       );
+      CREATE TABLE IF NOT EXISTS work_summaries (
+        id TEXT PRIMARY KEY,
+        work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+        overview TEXT NOT NULL,
+        themes_json TEXT NOT NULL DEFAULT '[]',
+        key_ideas_json TEXT NOT NULL DEFAULT '[]',
+        tensions_json TEXT NOT NULL DEFAULT '[]',
+        takeaways_json TEXT NOT NULL DEFAULT '[]',
+        open_questions_json TEXT NOT NULL DEFAULT '[]',
+        note_ids_json TEXT NOT NULL,
+        citation_map_json TEXT NOT NULL,
+        note_count INTEGER NOT NULL,
+        input_hash TEXT NOT NULL,
+        strategy TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prompt_version TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
@@ -187,6 +205,7 @@ export class KnowledgeStore {
       CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_note_id);
       CREATE INDEX IF NOT EXISTS idx_note_concepts_concept ON note_concepts(concept_id);
       CREATE INDEX IF NOT EXISTS idx_embeddings_model ON note_embeddings(model, representation_version);
+      CREATE INDEX IF NOT EXISTS idx_work_summaries_work ON work_summaries(work_id, created_at DESC);
     `);
     const sourceColumns = this.db.prepare("PRAGMA table_info(sources)").all() as Row[];
     if (!sourceColumns.some((column) => String(column.name) === "work_id")) {
@@ -243,13 +262,28 @@ export class KnowledgeStore {
     return { work, created: true };
   }
 
-  bindTelegramTopic(chatId: number, messageThreadId: number, workId: string): void {
+  bindTelegramTopic(chatId: number, messageThreadId: number, workId: string): number {
     const timestamp = now();
     this.db.prepare(`
       INSERT INTO telegram_topic_works (chat_id, message_thread_id, work_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(chat_id, message_thread_id) DO UPDATE SET work_id = excluded.work_id, updated_at = excluded.updated_at
     `).run(String(chatId), messageThreadId, workId, timestamp, timestamp);
+    const reassigned = this.db.prepare(`
+      UPDATE sources SET work_id = ?
+      WHERE CAST(json_extract(metadata_json, '$.telegramChatId') AS TEXT) = ?
+        AND CAST(json_extract(metadata_json, '$.telegramMessageThreadId') AS INTEGER) = ?
+        AND (work_id IS NULL OR work_id <> ?)
+    `).run(workId, String(chatId), messageThreadId, workId);
+    this.db.prepare(`
+      UPDATE capture_groups SET work_id = ?, updated_at = ?
+      WHERE id IN (
+        SELECT DISTINCT notes.capture_group_id FROM notes
+        JOIN sources ON sources.id = notes.source_id
+        WHERE sources.work_id = ? AND notes.capture_group_id IS NOT NULL
+      )
+    `).run(workId, timestamp, workId);
+    return Number(reassigned.changes);
   }
 
   workForTelegramTopic(chatId: number, messageThreadId: number): WorkRecord | undefined {
@@ -263,6 +297,37 @@ export class KnowledgeStore {
 
   listWorks(): WorkRecord[] {
     return (this.db.prepare("SELECT * FROM works ORDER BY created_at").all() as Row[]).map((row) => this.mapWork(row));
+  }
+
+  enrichedNotesForWork(workId: string): NoteRecord[] {
+    return (this.db.prepare(`
+      SELECT notes.* FROM notes
+      JOIN sources ON sources.id = notes.source_id
+      WHERE sources.work_id = ? AND notes.status IN ('enriched', 'reviewed')
+      ORDER BY sources.captured_at, CAST(json_extract(sources.metadata_json, '$.telegramMessageId') AS INTEGER), notes.ordinal
+    `).all(workId) as Row[]).map((row) => this.mapNote(row));
+  }
+
+  latestWorkSummary(workId: string): WorkSummaryRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM work_summaries WHERE work_id = ? ORDER BY created_at DESC LIMIT 1").get(workId) as Row | undefined;
+    return row ? this.mapWorkSummary(row) : undefined;
+  }
+
+  listWorkSummaries(): WorkSummaryRecord[] {
+    return (this.db.prepare("SELECT * FROM work_summaries ORDER BY created_at").all() as Row[]).map((row) => this.mapWorkSummary(row));
+  }
+
+  saveWorkSummary(summary: Omit<WorkSummaryRecord, "id" | "createdAt">): WorkSummaryRecord {
+    const record: WorkSummaryRecord = { ...summary, id: randomUUID(), createdAt: now() };
+    this.db.prepare(`
+      INSERT INTO work_summaries
+        (id, work_id, overview, themes_json, key_ideas_json, tensions_json, takeaways_json, open_questions_json,
+         note_ids_json, citation_map_json, note_count, input_hash, strategy, model, prompt_version, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(record.id, record.workId, record.overview, json(record.themes), json(record.keyIdeas), json(record.tensions),
+      json(record.takeaways), json(record.openQuestions), json(record.noteIds), json(record.citationMap), record.noteCount,
+      record.inputHash, record.strategy, record.model, record.promptVersion, record.createdAt);
+    return record;
   }
 
   startTelegramPassage(chatId: number, messageThreadId: number, commandMessageId: number): string {
@@ -755,7 +820,7 @@ export class KnowledgeStore {
 
   stats(): Record<string, number> {
     const getCount = (table: string) => Number((this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as Row).count);
-    const result: Record<string, number> = { works: getCount("works"), sources: getCount("sources"), notes: getCount("notes"), concepts: getCount("concepts"), note_embeddings: getCount("note_embeddings"), concept_embeddings: getCount("concept_embeddings"), edges: getCount("edges") };
+    const result: Record<string, number> = { works: getCount("works"), work_summaries: getCount("work_summaries"), sources: getCount("sources"), notes: getCount("notes"), concepts: getCount("concepts"), note_embeddings: getCount("note_embeddings"), concept_embeddings: getCount("concept_embeddings"), edges: getCount("edges") };
     const statuses = this.db.prepare("SELECT status, COUNT(*) AS count FROM notes GROUP BY status").all() as Row[];
     for (const row of statuses) result[`notes_${String(row.status)}`] = Number(row.count);
     return result;
@@ -763,9 +828,10 @@ export class KnowledgeStore {
 
   exportGraph(): GraphExport {
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       exportedAt: now(),
       works: this.listWorks(),
+      workSummaries: this.listWorkSummaries(),
       sources: (this.db.prepare("SELECT * FROM sources ORDER BY created_at").all() as Row[]).map((row) => this.mapSource(row)),
       notes: this.listNotes(),
       concepts: this.listConcepts(),
@@ -785,6 +851,18 @@ export class KnowledgeStore {
       workId: row.work_id === null || row.work_id === undefined ? null : String(row.work_id),
       capturedAt: String(row.captured_at), contentHash: String(row.content_hash), rawContent: String(row.raw_content),
       metadata: parseJson<Record<string, unknown>>(row.metadata_json, {}), createdAt: String(row.created_at),
+    };
+  }
+
+  private mapWorkSummary(row: Row): WorkSummaryRecord {
+    return {
+      id: String(row.id), workId: String(row.work_id), overview: String(row.overview),
+      themes: parseJson<string[]>(row.themes_json, []), keyIdeas: parseJson<string[]>(row.key_ideas_json, []),
+      tensions: parseJson<string[]>(row.tensions_json, []), takeaways: parseJson<string[]>(row.takeaways_json, []),
+      openQuestions: parseJson<string[]>(row.open_questions_json, []), noteIds: parseJson<string[]>(row.note_ids_json, []),
+      citationMap: parseJson<Record<string, string>>(row.citation_map_json, {}), noteCount: Number(row.note_count),
+      inputHash: String(row.input_hash), strategy: String(row.strategy), model: String(row.model),
+      promptVersion: String(row.prompt_version), createdAt: String(row.created_at),
     };
   }
 

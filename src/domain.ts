@@ -22,6 +22,25 @@ export interface WorkRecord {
   updatedAt: string;
 }
 
+export interface WorkSummaryRecord {
+  id: string;
+  workId: string;
+  overview: string;
+  themes: string[];
+  keyIdeas: string[];
+  tensions: string[];
+  takeaways: string[];
+  openQuestions: string[];
+  noteIds: string[];
+  citationMap: Record<string, string>;
+  noteCount: number;
+  inputHash: string;
+  strategy: string;
+  model: string;
+  promptVersion: string;
+  createdAt: string;
+}
+
 export interface SourceInput {
   kind: SourceKind;
   title: string;
@@ -139,9 +158,10 @@ export interface EdgeRecord {
 }
 
 export interface GraphExport {
-  schemaVersion: 3;
+  schemaVersion: 4;
   exportedAt: string;
   works: WorkRecord[];
+  workSummaries: WorkSummaryRecord[];
   sources: SourceRecord[];
   notes: NoteRecord[];
   concepts: ConceptRecord[];

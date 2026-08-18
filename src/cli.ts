@@ -10,6 +10,7 @@ import { extractFile } from "./extractors.js";
 import { processPending, type ProcessProgress } from "./pipeline.js";
 import { PROMPT_VERSION } from "./enrichment.js";
 import { KnowledgeStore } from "./store.js";
+import { OpenAIWorkSummarizer, renderWorkSummaryMarkdown, type WorkSummaryProgress } from "./summaries.js";
 import { TelegramClient, type TelegramSyncProgress } from "./telegram.js";
 
 const usage = `Digital Knowledge Network (v0.1)
@@ -18,6 +19,7 @@ Usage:
   dkn init [--db PATH]
   dkn ingest <file> [--title TITLE] [--db PATH]
   dkn process [--provider heuristic|openai] [--limit N] [--refresh] [--refresh-concepts] [--db PATH]
+  dkn summarize --work TITLE_OR_ID [--refresh] [--out PATH] [--db PATH]
   dkn telegram discover
   dkn telegram sync [--chat-id ID] [--db PATH]
   dkn status [--db PATH]
@@ -42,10 +44,11 @@ async function main(): Promise<void> {
     options: {
       db: { type: "string", default: ".dkn/knowledge.sqlite" },
       title: { type: "string" },
-      provider: { type: "string", default: "heuristic" },
+      provider: { type: "string" },
       limit: { type: "string", default: "100" },
-      out: { type: "string", default: ".dkn/graph.json" },
+      out: { type: "string" },
       "chat-id": { type: "string" },
+      work: { type: "string" },
       refresh: { type: "boolean", default: false },
       "refresh-concepts": { type: "boolean", default: false },
     },
@@ -88,6 +91,26 @@ async function main(): Promise<void> {
         },
       });
       console.log(JSON.stringify({ requeued, conceptsRequeued, ...result }, null, 2));
+    } else if (command === "summarize") {
+      const query = values.work?.trim();
+      if (!query) throw new Error("summarize requires --work TITLE_OR_ID");
+      const works = store.listWorks();
+      const normalizedQuery = query.toLocaleLowerCase();
+      const exact = works.filter((work) => work.id === query || work.title.toLocaleLowerCase() === normalizedQuery);
+      const matches = exact.length ? exact : works.filter((work) => work.title.toLocaleLowerCase().includes(normalizedQuery));
+      if (!matches.length) throw new Error(`No registered work matches “${query}”. Available works: ${store.listWorks().map((work) => work.title).join(", ") || "none"}`);
+      if (matches.length > 1) throw new Error(`“${query}” matches more than one work; use the exact title or work ID instead.`);
+      const work = matches[0]!;
+      const summarizer = new OpenAIWorkSummarizer({
+        baseUrl: process.env.DKN_LLM_BASE_URL ?? "http://127.0.0.1:8080/v1",
+        apiKey: process.env.DKN_LLM_API_KEY ?? "local",
+        model: process.env.DKN_LLM_MODEL ?? "LiquidAI/LFM2.5-2.6B",
+      });
+      const result = await summarizer.summarize(store, work, { refresh: values.refresh, onProgress: reportSummaryProgress });
+      const output = resolve(values.out ?? `.dkn/summaries/${safeFilename(work.title)}.md`);
+      mkdirSync(dirname(output), { recursive: true });
+      writeFileSync(output, renderWorkSummaryMarkdown(work, result.summary), "utf8");
+      console.log(JSON.stringify({ work: work.title, notes: result.summary.noteCount, cached: result.cached, summaryId: result.summary.id, output }, null, 2));
     } else if (command === "telegram") {
       const client = new TelegramClient(process.env.TELEGRAM_BOT_TOKEN ?? "");
       const action = positionals[0];
@@ -161,6 +184,24 @@ function reportTelegramProgress(progress: TelegramSyncProgress): void {
   } else if (progress.phase === "complete") {
     console.log(`[telegram] Synchronization finished in ${formatElapsed(progress.elapsedMs)}.`);
   }
+}
+
+function reportSummaryProgress(progress: WorkSummaryProgress): void {
+  if (progress.phase === "start") {
+    console.log(progress.cached ? `[summary] Reusing the current summary of ${progress.notes} notes.` : `[summary] Preparing ${progress.notes} atomic notes.`);
+  } else if (progress.phase === "batch-start") {
+    console.log(`[summary level ${progress.level} ${progress.current}/${progress.total}] Summarizing batch...`);
+  } else if (progress.phase === "batch-complete") {
+    console.log(`[summary level ${progress.level} ${progress.current}/${progress.total}] Completed in ${formatElapsed(progress.elapsedMs ?? 0)}.`);
+  } else if (progress.phase === "synthesis-start") {
+    console.log("[summary] Synthesizing the work overview...");
+  } else if (progress.phase === "complete") {
+    console.log(`[summary] ${progress.cached ? "Loaded" : "Generated"} summary covering ${progress.notes} notes in ${formatElapsed(progress.elapsedMs)}.`);
+  }
+}
+
+function safeFilename(value: string): string {
+  return value.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, " ").replace(/[. ]+$/, "") || "work-summary";
 }
 
 function formatElapsed(milliseconds: number): string {

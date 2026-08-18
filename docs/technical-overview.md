@@ -42,6 +42,7 @@ The generative model is shared infrastructure, not one undifferentiated agent. T
 - `atomic-note-enrichment` (`atomic-passage-v3`) produces the faithful core idea, context, descriptive tags, and confidence from canonical evidence;
 - `concept-selection` (`concept-selection-v4`) assigns exactly one primary controlled concept: it accepts the single retrieved candidate when it directly fits, otherwise it proposes one new concept;
 - `concept-maintenance` (`concept-maintenance-v1`) evaluates semantically similar concept pairs as merge, alias, or keep-separate proposals. It cannot assign concepts to notes or silently change the registry.
+- `work-summary` (`work-summary-v3`) hierarchically summarizes bounded groups of ordered atomic notes and synthesizes a versioned work overview with note-reference citations.
 
 The model, prompt version, confidence, and evidence are stored with derived records. Structured responses are repaired and retried when necessary; a note is not marked complete until it has one valid primary concept.
 
@@ -67,4 +68,6 @@ CLI commands cover database initialization, file ingestion, Telegram discovery/s
 
 The intended default processing path is local. `.env`, the SQLite database, model weights, and temporary media are Git-ignored. Telegram itself remains an external transport, and any future remote QA must be explicit rather than part of routine processing.
 
-Current limitations are deliberate: English-only OCR/transcription, no reliable original screenshot timestamp, embedding thresholds still need a user-labeled evaluation set, merge proposals are stored but not automatically applied, and work-level summaries, source reassignment, and external QA are not yet implemented. SQLite remains appropriate until graph scale or traversal requirements justify a dedicated graph store.
+Work summaries use a map-reduce hierarchy rather than placing an unbounded book into one context window. Leaf prompts receive bounded sets of atomic notes; intermediate digests are recursively reduced only when needed; the synthesis produces an overview, themes, key ideas, tensions, takeaways, and open questions. Each revision stores its ordered note IDs, deterministic input hash, citation map, strategy, model, and prompt version. It is invalidated by changed notes and never claims coverage beyond captured material.
+
+Current limitations are deliberate: English-only OCR/transcription, no reliable original screenshot timestamp, embedding thresholds still need a user-labeled evaluation set, merge proposals are stored but not automatically applied, and source reassignment, cross-work summaries, in-app summary reading, and external QA are not yet implemented. SQLite remains appropriate until graph scale or traversal requirements justify a dedicated graph store.

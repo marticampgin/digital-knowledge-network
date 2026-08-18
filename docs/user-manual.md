@@ -32,6 +32,8 @@ Create one topic per durable source, such as a book or article. Inside that topi
 
 Valid kinds are `book`, `article`, `website`, `audio`, `video`, and `other`. The topic then supplies that source identity to future uploads. The application does not guess a source from OCR or model knowledge. Material outside a registered topic can remain unassigned.
 
+Prefer to send `/source` before the first note in a new topic. The topic name is for you; it does not register the book by itself. When the command is synchronized, it binds both future captures and any existing imported captures from that same topic to the work, so material sent just before the command does not need to be re-uploaded. You do not need to repeat `/source` or use a global “current book” command.
+
 ## Capture notes
 
 - **Text:** send a normal Telegram message in the relevant topic.
@@ -61,6 +63,8 @@ Both long-running commands report live terminal progress. Telegram sync prints e
 
 Start the production application with `npm start` and open `http://127.0.0.1:4174`. For development, use `npm run app` and open `http://127.0.0.1:5173`.
 
+`npm start` only reads the existing local database and serves the current graph. It does not contact Telegram, start the language model, or reprocess notes. If no production build exists after a fresh clone, run `npm run build` once first.
+
 - **Network:** pan, zoom, fit, search, and filter the low-poly knowledge graph. Select a polygon node to inspect its idea, primary controlled concept, descriptive tags, source, and connections. Every atomic note has exactly one primary concept. Solid edges are provenance; dashed violet edges are semantic similarity.
 - **Sources:** browse notes as a list. Selecting one stays in Sources and opens its evidence panel.
 - **Canonical source text:** this is the stored original text, OCR result, or transcript. It is not rewritten by the LLM. Use **Copy source text** to copy it.
@@ -68,6 +72,18 @@ Start the production application with `npm start` and open `http://127.0.0.1:417
 - **Import:** the top-bar Import action accepts text/Markdown, common image formats, and common English audio formats. Direct UI imports currently receive deterministic heuristic enrichment. To use local-LLM enrichment for a file, ingest it with `npm run dev -- ingest <path>`, then run the OpenAI-compatible processing command.
 
 Graph connections distinguish what is known from what is inferred. Same-source, same-work order, capture order, and replies are provenance relationships. Dashed semantic links are mutual nearest neighbors produced by the local embedding model; their percentages are similarity scores, not proof that two claims are equivalent. Tags never create edges.
+
+## Summarize a finished work
+
+Run one command with the exact registered title:
+
+```powershell
+npm run summarize -- "The Everything Store"
+```
+
+The command starts the GPU model server if needed but does not synchronize Telegram. It orders all enriched notes assigned to that work, summarizes them in bounded batches, recursively combines batches when required, and writes the final Markdown file to `.dkn/summaries/`. The overview is explicitly a summary of your captured notes—not a claim to summarize unseen parts of the book. Note references such as `[N003]` map back to exact note IDs at the bottom of the file.
+
+The summary is cached by an input hash. Repeating the command is immediate when the notes are unchanged; adding or editing notes creates a new revision automatically. Use `npm run summarize -- "The Everything Store" -Refresh` only when you intentionally want another model-generated revision from identical inputs.
 
 ## Local data and recovery
 

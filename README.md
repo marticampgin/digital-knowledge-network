@@ -17,10 +17,11 @@ The project deliberately separates **capture**, **extraction**, **grouping**, **
 - Deduplicate imports by content hash.
 - Enrich notes either with a deterministic offline baseline or any OpenAI-compatible local model server.
 - Store sources, notes, provenance, model/prompt metadata, and typed graph edges in local SQLite.
+- Generate versioned, note-cited summaries of all captured material from one work with hierarchical batching.
 - Explore a responsive low-poly graph with pan, zoom, fit, search, typed relationship filters, controlled concepts, visible tags, import, and source inspection.
 - Export a stable JSON graph for another client or agent tool.
 
-The graph combines provenance edges with local MiniLM semantic neighbors. Threshold evaluation, applying concept-merge proposals, screenshot grouping controls, summaries, and optional remote QA remain future work.
+The graph combines provenance edges with local MiniLM semantic neighbors. Threshold evaluation, applying concept-merge proposals, screenshot grouping controls, cross-work summaries, and optional remote QA remain future work.
 
 ## Quick start
 
@@ -61,6 +62,14 @@ For the normal Telegram workflow, one command starts any missing local services,
 ```powershell
 npm run sync
 ```
+
+To open the existing application without synchronizing or processing anything, run `npm start`. To generate a summary of one finished work without Telegram synchronization, run:
+
+```powershell
+npm run summarize -- "The Everything Store"
+```
+
+This starts the local GPU model if necessary, summarizes only the captured atomic notes, stores a versioned revision, and writes Markdown under `.dkn/summaries/`. Repeating it reuses the current revision unless notes changed; add `-Refresh` to regenerate deliberately.
 
 See [Telegram setup](docs/telegram-setup.md) for the exact BotFather, privacy, group discovery, and first-sync procedure.
 
